@@ -1,0 +1,133 @@
+{
+  "fetched_at": "2026-05-10T18:40:58.719647+00:00",
+  "coins": {
+    "BTC": {
+      "price": 81310.0,
+      "change_24h": 0.455,
+      "volume_24h": 647543189.259363,
+      "source": "Binance",
+      "avg_price": 81310.0,
+      "max_deviation_pct": 0,
+      "sources_used": [
+        "Binance"
+      ],
+      "all_prices": {
+        "Binance": 81310.0
+      },
+      "quality": "✅ 一致"
+    },
+    "ETH": {
+      "price": 2358.01,
+      "change_24h": 1.105,
+      "volume_24h": 747378392.938933,
+      "source": "Binance",
+      "avg_price": 2358.01,
+      "max_deviation_pct": 0,
+      "sources_used": [
+        "Binance"
+      ],
+      "all_prices": {
+        "Binance": 2358.01
+      },
+      "quality": "✅ 一致"
+    },
+    "BNB": {
+      "price": 660.78,
+      "change_24h": 1.518,
+      "volume_24h": 57533393.6496,
+      "source": "Binance",
+      "avg_price": 660.78,
+      "max_deviation_pct": 0,
+      "sources_used": [
+        "Binance"
+      ],
+      "all_prices": {
+        "Binance": 660.78
+      },
+      "quality": "✅ 一致"
+    },
+    "SOL": {
+      "price": 96.68,
+      "change_24h": 3.523,
+      "volume_24h": 184903242.22264,
+      "source": "Binance",
+      "avg_price": 96.68,
+      "max_deviation_pct": 0,
+      "sources_used": [
+        "Binance"
+      ],
+      "all_prices": {
+        "Binance": 96.68
+      },
+      "quality": "✅ 一致"
+    },
+    "DOGE": {
+      "price": 0.11132,
+      "change_24h": 1.468,
+      "volume_24h": 50148361.74854,
+      "source": "Binance",
+      "avg_price": 0.11132,
+      "max_deviation_pct": 0,
+      "sources_used": [
+        "Binance"
+      ],
+      "all_prices": {
+        "Binance": 0.11132
+      },
+      "quality": "✅ 一致"
+    },
+    "TAO": {
+      "price": 327.8,
+      "change_24h": 5.47,
+      "volume_24h": 40995873.51873,
+      "source": "Binance",
+      "avg_price": 327.8,
+      "max_deviation_pct": 0,
+      "sources_used": [
+        "Binance"
+      ],
+      "all_prices": {
+        "Binance": 327.8
+      },
+      "quality": "✅ 一致"
+    }
+  },
+  "summary": {
+    "BTC": {
+      "price": 81310.0,
+      "change_24h": 0.46,
+      "primary_source": "Binance",
+      "quality": "✅ 一致"
+    },
+    "ETH": {
+      "price": 2358.01,
+      "change_24h": 1.1,
+      "primary_source": "Binance",
+      "quality": "✅ 一致"
+    },
+    "BNB": {
+      "price": 660.78,
+      "change_24h": 1.52,
+      "primary_source": "Binance",
+      "quality": "✅ 一致"
+    },
+    "SOL": {
+      "price": 96.68,
+      "change_24h": 3.52,
+      "primary_source": "Binance",
+      "quality": "✅ 一致"
+    },
+    "DOGE": {
+      "price": 0.11132,
+      "change_24h": 1.47,
+      "primary_source": "Binance",
+      "quality": "✅ 一致"
+    },
+    "TAO": {
+      "price": 327.8,
+      "change_24h": 5.47,
+      "primary_source": "Binance",
+      "quality": "✅ 一致"
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "audit_time": "2026-05-10T18:40:58.719647+00:00",
+  "tolerance_pct": 5.0,
+  "total_coins": 6,
+  "passed": 6,
+  "issues": 0,
+  "status": "PASS",
+  "passed_coins": [
+    {
+      "coin": "BTC",
+      "real_price": 81310.0,
+      "reported_price": 81310.0,
+      "deviation_pct": 0.0
+    },
+    {
+      "coin": "ETH",
+      "real_price": 2358.01,
+      "reported_price": 2358.0,
+      "deviation_pct": 0.0
+    },
+    {
+      "coin": "BNB",
+      "real_price": 660.78,
+      "reported_price": 660.0,
+      "deviation_pct": 0.12
+    },
+    {
+      "coin": "SOL",
+      "real_price": 96.68,
+      "reported_price": 96.68,
+      "deviation_pct": 0.0
+    },
+    {
+      "coin": "DOGE",
+      "real_price": 0.11132,
+      "reported_price": 0.1113,
+      "deviation_pct": 0.02
+    },
+    {
+      "coin": "TAO",
+      "real_price": 327.8,
+      "reported_price": 327.0,
+      "deviation_pct": 0.24
+    }
+  ],
+  "issue_coins": []
+}

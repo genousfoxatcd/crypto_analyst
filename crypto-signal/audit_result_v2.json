@@ -1,0 +1,86 @@
+{
+  "audit_time": "2026-05-11T00:00:00+00:00",
+  "status": "FAIL",
+  "price_source_note": "Live prices from CryptoCompare (Binance API unreachable from this network at audit time); signal prices are multi-exchange weighted avg from generation time 2026-05-10T19:10:59Z (~5h before audit).",
+  "price_check": {
+    "BTC": {
+      "signal_price": 81338.2,
+      "live_price": 81413.04,
+      "deviation_pct": 0.09,
+      "flagged": false
+    },
+    "ETH": {
+      "signal_price": 2357.35,
+      "live_price": 2361.08,
+      "deviation_pct": 0.16,
+      "flagged": false
+    },
+    "BNB": {
+      "signal_price": 660.81,
+      "live_price": 661.09,
+      "deviation_pct": 0.04,
+      "flagged": false
+    },
+    "SOL": {
+      "signal_price": 96.21,
+      "live_price": 96.34,
+      "deviation_pct": 0.14,
+      "flagged": false
+    },
+    "DOGE": {
+      "signal_price": 0.111126,
+      "live_price": 0.1112,
+      "deviation_pct": 0.07,
+      "flagged": false,
+      "note": "Live price is 0.1112; signal multi-source avg is 0.111126. However signal JSON stores price field as rounded 0.11 (2dp truncation), causing all entry/TP/SL values to also display as 0.11."
+    },
+    "TAO": {
+      "signal_price": 327.22,
+      "live_price": 329.5,
+      "deviation_pct": 0.70,
+      "flagged": false
+    }
+  },
+  "html_vs_json_check": {
+    "BTC":  {"html_price": 81338.20,  "json_price": 81338.2,  "deviation_pct": 0.0,   "ok": true},
+    "ETH":  {"html_price": 2357.35,   "json_price": 2357.35,  "deviation_pct": 0.0,   "ok": true},
+    "BNB":  {"html_price": 660.8144,  "json_price": 660.814444, "deviation_pct": 0.0, "ok": true},
+    "SOL":  {"html_price": 96.2060,   "json_price": 96.206,   "deviation_pct": 0.0,   "ok": true},
+    "DOGE": {"html_price": 0.1111,    "json_price": 0.11,     "deviation_pct": 1.0,   "ok": false, "note": "HTML shows 0.1111 (from sources), JSON price field truncated to 0.11"},
+    "TAO":  {"html_price": 327.2240,  "json_price": 327.22,   "deviation_pct": 0.01,  "ok": true}
+  },
+  "signal_completeness": {
+    "BTC":  {"complete": true,  "entry_zone": [80931.51, 81744.89], "tp1": 80372.96, "sl": 81703.55},
+    "ETH":  {"complete": true,  "entry_zone": [2345.56, 2369.13],   "tp1": 2311.81,  "sl": 2368.78},
+    "BNB":  {"complete": true,  "entry_zone": [657.51, 664.12],     "tp1": 647.66,   "sl": 663.97},
+    "SOL":  {"complete": true,  "entry_zone": [95.72, 96.69],       "tp1": 91.77,    "sl": 98.0},
+    "DOGE": {"complete": true,  "entry_zone": [0.11, 0.11],         "tp1": 0.11,     "sl": 0.11,   "warning": "All DOGE levels (entry/TP1/TP2/SL) display as 0.11 due to 2dp rounding — unusable for execution"},
+    "TAO":  {"complete": true,  "entry_zone": [325.59, 328.86],     "tp1": 310.58,   "sl": 328.62}
+  },
+  "paper_positions_ok": true,
+  "paper_positions_count": 6,
+  "paper_positions_issues": [
+    {
+      "coin": "TAO",
+      "severity": "CRITICAL",
+      "issue": "Paper position entry price $329.40 is ABOVE the signal SL level $328.62 — position was entered beyond its own stop-loss. Any mark-to-market at $329.40 is already in a loss zone relative to SL.",
+      "entry": 329.4,
+      "signal_sl": 328.62,
+      "signal_entry_zone_top": 328.86
+    },
+    {
+      "coin": "TAO",
+      "severity": "WARNING",
+      "issue": "Paper position entry $329.40 deviates 0.67% from signal mid $327.22 and is above the entry zone top $328.86 — filled outside defined entry zone.",
+      "entry": 329.4,
+      "signal_mid": 327.22,
+      "signal_entry_zone_top": 328.86
+    }
+  ],
+  "issues": [
+    "DOGE: signal JSON price field stores 0.11 (2dp truncation of actual 0.111126). Entry zone, TP1, TP2, SL all resolve to 0.11 — precision loss makes DOGE signal unusable for real execution.",
+    "DOGE: HTML/JSON display discrepancy — HTML correctly shows $0.1111 (from sources avg) while JSON price field is $0.11 (1.00% difference at boundary).",
+    "TAO CRITICAL: paper_positions entry price $329.40 is ABOVE signal SL $328.62 — position entered past its stop-loss level. Execution logic flaw.",
+    "TAO WARNING: paper_positions entry $329.40 exceeds signal entry zone top $328.86 — filled outside defined entry window."
+  ]
+}

@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Super Mario · 加密货币每日信号报告 · 2026-05-12</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --bg2: #161b22;
+  --card: #1c2128;
+  --card2: #21262d;
+  --border: #30363d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --green: #3fb950;
+  --green-bg: #0d2918;
+  --green-border: #196c2e;
+  --red: #f85149;
+  --red-bg: #2d0f0e;
+  --red-border: #6e1a17;
+  --yellow: #d29922;
+  --yellow-bg: #272115;
+  --yellow-border: #6a4c1a;
+  --purple: #a371f7;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.wrap { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+
+/* Header */
+.header {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  flex-wrap: wrap; gap: 12px;
+  padding-bottom: 20px; margin-bottom: 28px;
+  border-bottom: 1px solid var(--border);
+}
+.header-left h1 {
+  font-size: 1.5rem; font-weight: 700; color: var(--accent);
+  display: flex; align-items: center; gap: 8px;
+}
+.header-meta { color: var(--muted); font-size: 0.78rem; margin-top: 4px; }
+.header-badges { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; }
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600;
+}
+.badge-neutral { background: var(--yellow-bg); color: var(--yellow); border: 1px solid var(--yellow-border); }
+.badge-long { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+.badge-short { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
+
+/* Section headers */
+.section-title {
+  font-size: 1rem; font-weight: 600; color: var(--accent);
+  margin: 28px 0 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+}
+
+/* Macro grid */
+.macro-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 8px; }
+.macro-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  padding: 14px 16px;
+}
+.macro-label { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.macro-value { font-size: 1.1rem; font-weight: 700; }
+.macro-sub { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+.up { color: var(--green); }
+.down { color: var(--red); }
+.neutral { color: var(--yellow); }
+
+/* Coin grid */
+.coin-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+.coin-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  padding: 16px; position: relative; overflow: hidden;
+}
+.coin-card.signal-long { border-left: 3px solid var(--green); }
+.coin-card.signal-short { border-left: 3px solid var(--red); }
+.coin-card.signal-neutral { border-left: 3px solid var(--yellow); }
+.coin-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.coin-name { font-size: 1rem; font-weight: 700; }
+.coin-sub { font-size: 0.72rem; color: var(--muted); }
+.signal-pill {
+  padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.pill-long { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+.pill-short { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
+.pill-neutral { background: var(--yellow-bg); color: var(--yellow); border: 1px solid var(--yellow-border); }
+.coin-price { font-size: 1.3rem; font-weight: 700; margin-bottom: 10px; }
+.coin-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+.stat-row { display: flex; justify-content: space-between; align-items: center; }
+.stat-label { color: var(--muted); font-size: 0.72rem; }
+.stat-value { font-size: 0.78rem; font-weight: 600; }
+.bb-bar { margin: 10px 0; }
+.bb-bar-label { display: flex; justify-content: space-between; font-size: 0.68rem; color: var(--muted); margin-bottom: 4px; }
+.bb-track { background: var(--card2); border-radius: 4px; height: 6px; position: relative; overflow: visible; }
+.bb-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, #1f6feb, #58a6ff); transition: width 0.3s; }
+.bb-dot {
+  position: absolute; top: 50%; transform: translate(-50%, -50%);
+  width: 10px; height: 10px; border-radius: 50%;
+  border: 2px solid var(--bg);
+}
+.prob-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.prob-label { color: var(--muted); font-size: 0.72rem; white-space: nowrap; }
+.prob-track { flex: 1; background: var(--card2); border-radius: 4px; height: 5px; }
+.prob-fill { height: 100%; border-radius: 4px; }
+.prob-val { font-size: 0.75rem; font-weight: 700; min-width: 30px; text-align: right; }
+.coin-analysis {
+  background: var(--card2); border-radius: 6px; padding: 8px 10px;
+  font-size: 0.72rem; color: var(--muted); margin-top: 8px; line-height: 1.5;
+}
+.entry-zone {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 10px; margin-top: 8px;
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px; font-size: 0.7rem;
+}
+.ez-item { text-align: center; }
+.ez-label { color: var(--muted); margin-bottom: 2px; }
+.ez-val { font-weight: 700; font-size: 0.75rem; }
+
+/* Portfolio */
+.portfolio-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }
+.ps-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  padding: 14px; text-align: center;
+}
+.ps-label { color: var(--muted); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.ps-value { font-size: 1.2rem; font-weight: 700; }
+.ps-sub { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
+
+.pos-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.pos-table th {
+  background: var(--card2); color: var(--muted);
+  font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+  padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border);
+}
+.pos-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.pos-table tr:last-child td { border-bottom: none; }
+.pos-table tr:hover td { background: var(--card2); }
+
+/* Signal ranking */
+.rank-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.rank-table th {
+  background: var(--card2); color: var(--muted);
+  font-size: 0.68rem; font-weight: 600; text-transform: uppercase;
+  padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border);
+}
+.rank-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.rank-table tr:last-child td { border-bottom: none; }
+.rank-table tr:hover td { background: var(--card2); }
+.stars { color: var(--yellow); font-size: 0.85rem; }
+
+/* Advice */
+.advice-list { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.advice-item {
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; display: flex; gap: 12px;
+}
+.advice-num {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--card2); color: var(--accent);
+  font-weight: 700; font-size: 0.75rem; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.advice-content { font-size: 0.82rem; line-height: 1.6; }
+.advice-title { font-weight: 700; margin-bottom: 2px; }
+
+/* Alert box */
+.alert-box {
+  background: var(--yellow-bg); border: 1px solid var(--yellow-border);
+  border-radius: 8px; padding: 12px 16px; margin: 14px 0;
+  font-size: 0.82rem; color: var(--yellow);
+}
+
+/* Footer */
+footer {
+  border-top: 1px solid var(--border); padding-top: 16px; margin-top: 32px;
+  color: var(--muted); font-size: 0.72rem; text-align: center;
+}
+
+@media (max-width: 768px) {
+  .macro-grid { grid-template-columns: 1fr 1fr; }
+  .coin-grid { grid-template-columns: 1fr; }
+  .portfolio-summary { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 480px) {
+  .macro-grid { grid-template-columns: 1fr; }
+  .portfolio-summary { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- Header -->
+<div class="header">
+  <div class="header-left">
+    <h1>🔍 Super Mario &nbsp;·&nbsp; 加密货币每日信号报告</h1>
+    <div class="header-meta">2026-05-12 &nbsp;17:00 CST &nbsp;|&nbsp; crypto_signal_v2 &nbsp;·&nbsp; paper_trader v3.0 &nbsp;|&nbsp; 覆盖: BTC · ETH · BNB · SOL · DOGE · TAO · ZEC · CAKE</div>
+  </div>
+  <div class="header-badges">
+    <span class="badge badge-neutral">😐 恐贪 49 中性</span>
+    <span class="badge badge-long">📈 ETH 极限超卖 P=66%</span>
+    <span class="badge badge-long">💎 ZEC 最强做多 P=67%</span>
+  </div>
+</div>
+
+<!-- Macro -->
+<div class="section-title">📊 宏观环境</div>
+<div class="macro-grid">
+  <div class="macro-card">
+    <div class="macro-label">恐贪指数</div>
+    <div class="macro-value neutral">49 中性</div>
+    <div class="macro-sub">市场情绪平衡，无极端信号</div>
+  </div>
+  <div class="macro-card">
+    <div class="macro-label">纳斯达克</div>
+    <div class="macro-value">26,274</div>
+    <div class="macro-sub">科技股承压，宏观谨慎</div>
+  </div>
+  <div class="macro-card">
+    <div class="macro-label">BTC 24h</div>
+    <div class="macro-value down">$80,689 <small style="font-size:0.8rem">-0.70%</small></div>
+    <div class="macro-sub">区间震荡 $80,000–$81,000</div>
+  </div>
+  <div class="macro-card">
+    <div class="macro-label">BTC 资金费率</div>
+    <div class="macro-value">+0.003%</div>
+    <div class="macro-sub">中性偏多，无过热</div>
+  </div>
+  <div class="macro-card">
+    <div class="macro-label">BTC 多空比</div>
+    <div class="macro-value down">L/S 0.818</div>
+    <div class="macro-sub">多头 45%，空头轻微主导</div>
+  </div>
+  <div class="macro-card">
+    <div class="macro-label">BTC OI</div>
+    <div class="macro-value">$8,245M</div>
+    <div class="macro-sub">持仓量稳定</div>
+  </div>
+</div>
+<div class="alert-box">
+  ⚠️ 宏观处于震荡整理阶段，BTC 无明确方向。ETH 和 ZEC 技术面超卖，提供做多窗口。DOGE 多头拥挤度极高（74%），警惕反转风险。
+</div>
+
+<!-- Coin Signals -->
+<div class="section-title">📈 各币种技术信号</div>
+<div class="coin-grid">
+
+  <!-- BTC -->
+  <div class="coin-card signal-neutral">
+    <div class="coin-header">
+      <div>
+        <div class="coin-name">BTC <span style="color:var(--muted);font-size:0.8rem;font-weight:400">比特币</span></div>
+        <div class="coin-sub">OI $8,245M &nbsp;|&nbsp; ATR 1.02%</div>
+      </div>
+      <span class="signal-pill pill-neutral">🟡 观望 P=45%</span>
+    </div>
+    <div class="coin-price">$80,689 <span class="down" style="font-size:0.85rem">-0.70%</span></div>
+    <div class="coin-stats">
+      <div class="stat-row"><span class="stat-label">资金费率</span><span class="stat-value">+0.003%</span></div>
+      <div class="stat-row"><span class="stat-label">多空比</span><span class="stat-value down">0.818 (多45%)</span></div>
+      <div class="stat-row"><span class="stat-label">Taker BSR</span><span class="stat-value">0.585</span></div>
+      <div class="stat-row"><span class="stat-label">买方流量</span><span class="stat-value">49.3%</span></div>
+    </div>
+    <div class="bb-bar">
+      <div class="bb-bar-label"><span>下轨 $80,048</span><span>中轨 $81,017</span><span>上轨 $81,985</span></div>
+      <div class="bb-track">
+        <div class="bb-fill" style="width:32%"></div>
+        <div class="bb-dot" style="left:32%;background:var(--yellow)"></div>
+      </div>
+    </div>
+    <div class="prob-row">
+      <span class="prob-label">布林位置</span>
+      <div class="prob-track"><div class="prob-fill" style="width:32%;background:var(--yellow)"></div></div>
+      <span class="prob-val neutral">32%</span>
+    </div>
+    <div class="entry-zone">
+      <div class="ez-item"><div class="ez-label">支撑</div><div class="ez-val">$79,479</div></div>
+      <div class="ez-item"><div class="ez-label">TP1</div><div class="ez-val up">$81,017</div></div>
+      <div class="ez-item"><div class="ez-label">止损</div><div class="ez-val down">$74,234</div></div>
+    </div>
+    <div class="coin-analysis">无强方向信号，等待回调至 $79,500 支撑位。L/S &lt;1 暗示空头微占优。挂单 $79,577 待成交。</div>
+  </div>
+
+  <!-- ETH -->
+  <div class="coin-card signal-long">
+    <div class="coin-header">
+      <div>
+        <div class="coin-name">ETH <span style="color:var(--muted);font-size:0.8rem;font-weight:400">以太坊 ⭐⭐⭐</span></div>
+        <div class="coin-sub">OI $5,023M &nbsp;|&nbsp; ATR 1.27%</div>
+      </div>
+      <span class="signal-pill pill-long">🟢 做多 P=66%</span>
+    </div>
+    <div class="coin-price">$2,285 <span class="down" style="font-size:0.85rem">-1.88%</span></div>
+    <div class="coin-stats">
+      <div class="stat-row"><span class="stat-label">资金费率</span><span class="stat-value">+0.003%</span></div>
+      <div class="stat-row"><span class="stat-label">多空比</span><span class="stat-value up">1.274 (多56%)</span></div>
+      <div class="stat-row"><span class="stat-label">Taker BSR</span><span class="stat-value">0.713</span></div>
+      <div class="stat-row"><span class="stat-label">买方流量</span><span class="stat-value">47.2%</span></div>
+    </div>
+    <div class="bb-bar">
+      <div class="bb-bar-label"><span>下轨 $2,283</span><span>中轨 $2,326</span><span>上轨 $2,369</span></div>
+      <div class="bb-track">
+        <div class="bb-fill" style="width:2%;background:var(--green)"></div>
+        <div class="bb-dot" style="left:2%;background:var(--green)"></div>
+      </div>
+    </div>
+    <div class="prob-row">
+      <span class="prob-label">布林位置</span>
+      <div class="prob-track"><div class="prob-fill" style="width:2%;background:var(--green)"></div></div>
+      <span class="prob-val up">2% 极限超卖</span>
+    </div>
+    <div class="entry-zone">
+      <div class="ez-item"><div class="ez-label">入场区间</div><div class="ez-val up">$2,274–$2,297</div></div>
+      <div class="ez-item"><div class="ez-label">TP1</div><div class="ez-val up">$2,326</div></div>
+      <div class="ez-item"><div class="ez-label">止损</div><div class="ez-val down">$2,260</div></div>
+    </div>
+    <div class="coin-analysis">BB 位置 2% 极限超卖，技术反弹概率高。多头 56% 积累 + ETF 持续资金流入。当前最强做多信号之一。</div>
+  </div>
+
+  <!-- BNB -->
+  <div class="coin-card signal-short">
+    <div class="coin-header">
+      <div>
+        <div class="coin-name">BNB <span style="color:var(--muted);font-size:0.8rem;font-weight:400">币安币</span></div>
+        <div class="coin-sub">OI $411M &nbsp;|&nbsp; ATR 1.32%</div>
+      </div>
+      <span class="signal-pill pill-short">🔴 做空 P=35%</span>
+    </div>
+    <div class="coin-price">$660 <span class="up" style="font-size:0.85rem">+0.79%</span></div>
+    <div class="coin-stats">
+      <div class="stat-row"><span class="stat-label">资金费率</span><span class="stat-value down">+0.017% ⚠️</span></div>
+      <div class="stat-row"><span class="stat-label">多空比</span><span class="stat-value">1.470 (多60%)</span></div>
+      <div class="stat-row"><span class="stat-label">Taker BSR</span><span class="stat-value">0.709</span></div>
+      <div class="stat-row"><span class="stat-label">买方流量</span><span class="stat-value">49.5%</span></div>
+    </div>
+    <div class="bb-bar">
+      <div class="bb-bar-label"><span>下轨 $643</span><span>中轨 $657</span><span>上轨 $670</span></div>
+      <div class="bb-track">
+        <div class="bb-fill" style="width:67%;background:#f87171"></div>
+        <div class="bb-dot" style="left:67%;background:var(--red)"></div>
+      </div>
+    </div>
+    <div class="prob-row">
+      <span class="prob-label">布林位置</span>
+      <div class="prob-track"><div class="prob-fill" style="width:67%;background:var(--red)"></div></div>
+      <span class="prob-val down">67% 偏高</span>
+    </div>
+    <div class="entry-zone">
+      <div class="ez-item"><div class="ez-label">入场区间</div><div class="ez-val down">$663.7–$672.5</div></div>
+      <div class="ez-item"><div class="ez-label">TP1</div><div class="ez-val up">$657</div></div>
+      <div class="ez-item"><div class="ez-label">止损</div><div class="ez-val down">$678</div></div>
+    </div>
+    <div class="coin-analysis">BB 67% + FR +0.017%（偏高），但概率仅 35%。BNB 受 Binance 生态支撑，信号强度偏弱，慎重做空。</div>
+  </div>
+
+  <!-- SOL -->
+  <div class="coin-card signal-short">
+    <div class="coin-header">
+      <div>
+        <div class="coin-name">SOL <span style="color:var(--muted);font-size:0.8rem;font-weight:400">Solana · 持仓中</span></div>
+        <div class="coin-sub">OI $1,117M &nbsp;|&nbsp; ATR 2.01%</div>
+      </div>
+      <span class="signal-pill pill-short">🔴 做空 P=35%</span>
+    </div>
+    <div class="coin-price" style="display:flex;align-items:center;gap:10px">
+      $95.04 <span class="down" style="font-size:0.85rem">-0.24%</span>
+      <span class="badge badge-long" style="font-size:0.68rem">持仓 +$4.46 (+1.4%)</span>
+    </div>
+    <div class="coin-stats">
+      <div class="stat-row"><span class="stat-label">资金费率</span><span class="stat-value">+0.004%</span></div>
+      <div class="stat-row"><span class="stat-label">多空比</span><span class="stat-value down">1.731 (多63%)</span></div>
+      <div class="stat-row"><span class="stat-label">Taker BSR</span><span class="stat-value">0.971</span></div>
+      <div class="stat-row"><span class="stat-label">买方流量</span><span class="stat-value">48.5%</span></div>
+    </div>
+    <div class="bb-bar">
+      <div class="bb-bar-label"><span>下轨 $92</span><span>中轨 $95</span><span>上轨 $98</span></div>
+      <div class="bb-track">
+        <div class="bb-fill" style="width:50%;background:#f87171"></div>
+        <div class="bb-dot" style="left:50%;background:var(--red)"></div>
+      </div>
+    </div>
+    <div class="prob-row">
+      <span class="prob-label">布林位置</span>
+      <div class="prob-track"><div class="prob-fill" style="width:50%;background:var(--red)"></div></div>
+      <span class="prob-val down">50% 中轨</span>
+    </div>
+    <div class="entry-zone">
+      <div class="ez-item"><div class="ez-label">入场 SHORT</div><div class="ez-val down">$95.52–$98.57</div></div>
+      <div class="ez-item"><div class="ez-label">TP1</div><div class="ez-val up">$92</div></div>
+      <div class="ez-item"><div class="ez-label">止损</div><div class="ez-val down">$99.53</div></div>
+    </div>
+    <div class="coin-analysis">多空比 1.731（63% 多头），OI $1,117M 拥挤。SHORT @ $95.43 持仓中，TP1 $92 距目标 3.2%，继续持有。</div>
+  </div>
+
+  <!-- DOGE -->
+  <div class="coin-card signal-neutral">
+    <div class="coin-header">
+      <div>
+        <div class="coin-name">DOGE <span style="color:var(--muted);font-size:0.8rem;font-weight:400">狗狗币 ⚠️</span></div>
+        <div class="coin-sub">OI $330.8M &nbsp;|&nbsp; ATR 1.98%</div>
+      </div>
+      <span class="signal-pill pill-neutral">🟡 观望 P=39%</span>
+    </div>
+    <div class="coin-price">$0.1092 <span class="down" style="font-size:0.85rem">-0.62%</span></div>
+    <div class="coin-stats">
+      <div class="stat-row"><span class="stat-label">资金费率</span><span class="stat-value">+0.004%</span></div>
+      <div class="stat-row"><span class="stat-label">多空比</span><span class="stat-value down">2.908 (多74%) ⚠️</span></div>
+      <div class="stat-row"><span class="stat-label">Taker BSR</span><span class="stat-value">1.266</span></div>
+      <div class="stat-row"><span class="stat-label">买方流量</span><span class="stat-value">48.7%</span></div>
+    </div>
+    <div class="bb-bar">
+      <div class="bb-bar-label"><span>下轨 $0.107</span><span>中轨 $0.110</span><span>上轨 $0.112</span></div>
+      <div class="bb-track">
+        <div class="bb-fill" style="width:38%;background:var(--yellow)"></div>
+        <div class="bb-dot" style="left:38%;background:var(--yellow)"></div>
+      </div>
+    </div>
+    <div class="prob-row">
+      <span class="prob-label">布林位置</span>
+      <div class="prob-track"><div class="prob-fill" style="width:38%;background:var(--yellow)"></div></div>
+      <span class="prob-val neutral">38%</span>
+    </div>
+    <div class="coin-analysis">L/S 2.908 是本期 8 币最极端读数，74% 多头极度拥挤。历史上极度拥挤多头往往引发快速多杀多，等待做空信号确认。</div>
+  </div>
+
+  <!-- TAO -->
+  <div class="coin-card signal-short">
+    <div class="coin-header">
+      <div>
+        <div class="coin-name">TAO <span style="color:var(--muted);font-size:0.8rem;font-weight:400">Bittensor · 持仓中</span></div>
+        <div class="coin-sub">OI $102.6M &nbsp;|&nbsp; ATR 3.35% 高波动</div>
+      </div>
+      <span class="signal-pill pill-short">🔴 做空 P=36%</span>
+    </div>
+    <div class="coin-price" style="display:flex;align-items:center;gap:10px">
+      $313.42 <span class="down" style="font-size:0.85rem">-2.25%</span>
+      <span class="badge badge-long" style="font-size:0.68rem">持仓 +$16.49 (+5.2%)</span>
+    </div>
+    <div class="coin-stats">
+      <div class="stat-row"><span class="stat-label">资金费率</span><span class="stat-value">+0.005%</span></div>
+      <div class="stat-row"><span class="stat-label">多空比</span><span class="stat-value down">1.794 (多64%)</span></div>
+      <div class="stat-row"><span class="stat-label">Taker BSR</span><span class="stat-value">0.681</span></div>
+      <div class="stat-row"><span class="stat-label">买方流量</span><span class="stat-value down">46.6%</span></div>
+    </div>
+    <div class="bb-bar">
+      <div class="bb-bar-label"><span>下轨 $305</span><span>中轨 $317</span><span>上轨 $329</span></div>
+      <div class="bb-track">
+        <div class="bb-fill" style="width:35%;background:#f87171"></div>
+        <div class="bb-dot" style="left:35%;background:var(--red)"></div>
+      </div>
+    </div>
+    <div class="prob-row">
+      <span class="prob-label">布林位置</span>
+      <div class="prob-track"><div class="prob-fill" style="width:35%;background:var(--red)"></div></div>
+      <span class="prob-val down">35% 偏空</span>
+    </div>
+    <div class="entry-zone">
+      <div class="ez-item"><div class="ez-label">入场 SHORT</div><div class="ez-val down">$312.8–$316.7</div></div>
+      <div class="ez-item"><div class="ez-label">TP1 ✅</div><div class="ez-val up">$304.75</div></div>
+      <div class="ez-item"><div class="ez-label">止损</div><div class="ez-val down">$319.87</div></div>
+    </div>
+    <div class="coin-analysis">日跌 -2.25%，趋势明确向下，ATR 3.35% 高波动。BB 35% 偏空，SHORT @ $318.46，已超 TP1 $316.60，继续持有等 TP2 $305-308。</div>
+  </div>
+
+  <!-- ZEC -->
+  <div class="coin-card signal-long">
+    <div class="coin-header">
+      <div>
+        <div class="coin-name">ZEC <span style="color:var(--muted);font-size:0.8rem;font-weight:400">Zcash ⭐⭐⭐ 最强</span></div>
+        <div class="coin-sub">OI $271.3M &nbsp;|&nbsp; ATR 3.28%</div>
+      </div>
+      <span class="signal-pill pill-long">🟢 做多 P=67%</span>
+    </div>
+    <div class="coin-price">$552.59 <span class="down" style="font-size:0.85rem">-1.85%</span></div>
+    <div class="coin-stats">
+      <div class="stat-row"><span class="stat-label">资金费率</span><span class="stat-value">+0.006%</span></div>
+      <div class="stat-row"><span class="stat-label">多空比</span><span class="stat-value">0.861 (空微主)</span></div>
+      <div class="stat-row"><span class="stat-label">Taker BSR</span><span class="stat-value up">0.897</span></div>
+      <div class="stat-row"><span class="stat-label">买方流量</span><span class="stat-value up">50.8% ↑</span></div>
+    </div>
+    <div class="bb-bar">
+      <div class="bb-bar-label"><span>下轨 $540</span><span>中轨 $580</span><span>上轨 $620</span></div>
+      <div class="bb-track">
+        <div class="bb-fill" style="width:16%;background:var(--green)"></div>
+        <div class="bb-dot" style="left:16%;background:var(--green)"></div>
+      </div>
+    </div>
+    <div class="prob-row">
+      <span class="prob-label">布林位置</span>
+      <div class="prob-track"><div class="prob-fill" style="width:16%;background:var(--green)"></div></div>
+      <span class="prob-val up">16% 接近超卖</span>
+    </div>
+    <div class="entry-zone">
+      <div class="ez-item"><div class="ez-label">入场区间</div><div class="ez-val up">$549.8–$555.3</div></div>
+      <div class="ez-item"><div class="ez-label">TP1</div><div class="ez-val up">$579.82</div></div>
+      <div class="ez-item"><div class="ez-label">止损</div><div class="ez-val down">$525.02</div></div>
+    </div>
+    <div class="coin-analysis">BB 16% 技术超卖 + 买方流量 50.8% 微正 + OI $271M 流动性充足。Grayscale ZEC 信托 Q2 2026 预期催化，隐私赛道叙事回暖。</div>
+  </div>
+
+  <!-- CAKE -->
+  <div class="coin-card signal-short">
+    <div class="coin-header">
+      <div>
+        <div class="coin-name">CAKE <span style="color:var(--muted);font-size:0.8rem;font-weight:400">PancakeSwap</span></div>
+        <div class="coin-sub">OI $7.2M ⚠️ 极低流动性</div>
+      </div>
+      <span class="signal-pill pill-short">🔴 做空 P=35%</span>
+    </div>
+    <div class="coin-price">$1.5483 <span class="down" style="font-size:0.85rem">-2.09%</span></div>
+    <div class="coin-stats">
+      <div class="stat-row"><span class="stat-label">资金费率</span><span class="stat-value">+0.004%</span></div>
+      <div class="stat-row"><span class="stat-label">多空比</span><span class="stat-value down">2.719 (多73%)</span></div>
+      <div class="stat-row"><span class="stat-label">Taker BSR</span><span class="stat-value">0.884</span></div>
+      <div class="stat-row"><span class="stat-label">买方流量</span><span class="stat-value down">43.6% ↓</span></div>
+    </div>
+    <div class="bb-bar">
+      <div class="bb-bar-label"><span>下轨 $1.52</span><span>中轨 $1.57</span><span>上轨 $1.62</span></div>
+      <div class="bb-track">
+        <div class="bb-fill" style="width:26%;background:#f87171"></div>
+        <div class="bb-dot" style="left:26%;background:var(--red)"></div>
+      </div>
+    </div>
+    <div class="prob-row">
+      <span class="prob-label">布林位置</span>
+      <div class="prob-track"><div class="prob-fill" style="width:26%;background:var(--red)"></div></div>
+      <span class="prob-val down">26% 偏低</span>
+    </div>
+    <div class="coin-analysis">OI 仅 $7.2M，流动性极低，大额操作滑点风险高。多头 73% 过度拥挤，买方流量 43.6% 暗示多头离场。<strong>慎入，跳过本期。</strong></div>
+  </div>
+
+</div><!-- /coin-grid -->
+
+<!-- Portfolio -->
+<div class="section-title">💼 模拟账户持仓</div>
+<div class="portfolio-summary">
+  <div class="ps-card">
+    <div class="ps-label">账户总值</div>
+    <div class="ps-value up">$1,020.57</div>
+    <div class="ps-sub">初始 $1,000</div>
+  </div>
+  <div class="ps-card">
+    <div class="ps-label">累计盈利</div>
+    <div class="ps-value up">+$20.57</div>
+    <div class="ps-sub">+2.1%</div>
+  </div>
+  <div class="ps-card">
+    <div class="ps-label">当前回撤</div>
+    <div class="ps-value up">0.0%</div>
+    <div class="ps-sub">上限 3.0%</div>
+  </div>
+  <div class="ps-card">
+    <div class="ps-label">历史峰值</div>
+    <div class="ps-value">$1,020.57</div>
+    <div class="ps-sub">2026-05-12</div>
+  </div>
+</div>
+
+<style>
+.pos-table th, .pos-table td { white-space: nowrap; }
+.tp-sl-cell { font-size: 0.72rem; line-height: 1.7; }
+.tp-val { color: var(--green); font-weight: 600; }
+.sl-val { color: var(--red); font-weight: 600; }
+.date-cell { font-size: 0.72rem; color: var(--muted); line-height: 1.7; }
+.tp-hit { background: #0d2918; color: var(--green); border-radius: 3px; padding: 0 4px; font-weight: 700; }
+.section-divider td {
+  background: var(--bg2) !important;
+  color: var(--muted);
+  font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px;
+  padding: 5px 12px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.section-divider.open td { border-left: 3px solid var(--green); color: var(--green); }
+.section-divider.pending td { border-left: 3px solid var(--yellow); color: var(--yellow); }
+.pending-row td { background: rgba(210, 153, 34, 0.04); }
+.pending-row:hover td { background: rgba(210, 153, 34, 0.08) !important; }
+.gap-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 0.68rem; font-weight: 600;
+  background: var(--yellow-bg); color: var(--yellow); border: 1px solid var(--yellow-border);
+}
+</style>
+<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;overflow-x:auto">
+<table class="pos-table">
+  <thead>
+    <tr>
+      <th>币种</th>
+      <th>方向</th>
+      <th>入场价</th>
+      <th>现价</th>
+      <th>杠杆/保证金</th>
+      <th>下单日期</th>
+      <th>成交日期</th>
+      <th>止盈 TP1 / TP2</th>
+      <th>止损 SL</th>
+      <th>P&amp;L</th>
+      <th>状态</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr class="section-divider open"><td colspan="11">🟢 持仓中 &nbsp;·&nbsp; 2 positions</td></tr>
+    <tr>
+      <td><strong>SOL</strong></td>
+      <td><span class="badge badge-short">SHORT</span></td>
+      <td>$95.43</td>
+      <td>$95.03</td>
+      <td class="date-cell">3x &nbsp;/&nbsp; $315</td>
+      <td class="date-cell">05-11 15:02</td>
+      <td class="date-cell">05-11 15:02<br><span style="color:var(--green);font-size:0.68rem">✅ 即时成交</span></td>
+      <td class="tp-sl-cell">
+        <span class="tp-val">$92.85</span> <span style="color:var(--muted);font-size:0.68rem">TP1</span><br>
+        <span class="tp-val" style="opacity:0.7">$88.06</span> <span style="color:var(--muted);font-size:0.68rem">TP2</span>
+      </td>
+      <td class="tp-sl-cell"><span class="sl-val">$98.92</span></td>
+      <td class="up">+$4.46<br><span style="font-size:0.7rem">+1.4%</span></td>
+      <td><span style="color:var(--green)">🟢 持仓中</span></td>
+    </tr>
+    <tr>
+      <td><strong>TAO</strong></td>
+      <td><span class="badge badge-short">SHORT</span></td>
+      <td>$318.46</td>
+      <td>$313.42</td>
+      <td class="date-cell">3x &nbsp;/&nbsp; $315</td>
+      <td class="date-cell">05-11 15:02</td>
+      <td class="date-cell">05-11 15:02<br><span style="color:var(--green);font-size:0.68rem">✅ 即时成交</span></td>
+      <td class="tp-sl-cell">
+        <span class="tp-val"><span class="tp-hit">$312.90 TP1✅</span></span><br>
+        <span class="tp-val" style="opacity:0.7">$300.80</span> <span style="color:var(--muted);font-size:0.68rem">TP2</span>
+      </td>
+      <td class="tp-sl-cell"><span class="sl-val">$332.16</span></td>
+      <td class="up">+$16.49<br><span style="font-size:0.7rem">+5.2%</span></td>
+      <td><span style="color:var(--green)">🟢 持仓中</span></td>
+    </tr>
+    <tr class="section-divider pending"><td colspan="11">⏳ 委托挂单 &nbsp;·&nbsp; 1 pending &nbsp;·&nbsp; 未成交</td></tr>
+    <tr class="pending-row">
+      <td><strong>BTC</strong></td>
+      <td><span class="badge badge-long">LONG</span></td>
+      <td style="color:var(--muted)">限价 $79,577</td>
+      <td>$80,655</td>
+      <td class="date-cell">3x &nbsp;/&nbsp; $370</td>
+      <td class="date-cell">05-11 15:02</td>
+      <td class="date-cell" style="color:var(--yellow)">⏳ 未成交<br><span style="font-size:0.68rem">到期 05-16</span></td>
+      <td class="tp-sl-cell">
+        <span class="tp-val">$80,562.79</span> <span style="color:var(--muted);font-size:0.68rem">TP1</span><br>
+        <span class="tp-val" style="opacity:0.7">$81,754.05</span> <span style="color:var(--muted);font-size:0.68rem">TP2</span>
+      </td>
+      <td class="tp-sl-cell"><span class="sl-val">$78,848.43</span></td>
+      <td class="neutral" style="color:var(--muted)">— <br><span style="font-size:0.7rem">-1.34% 待触</span></td>
+      <td><span style="color:var(--yellow)">⏳ 挂单中</span></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<!-- Signal Ranking -->
+<div class="section-title">🏆 信号优先级排行</div>
+<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+<table class="rank-table">
+  <thead>
+    <tr><th>优先级</th><th>币种</th><th>方向</th><th>概率</th><th>关键理由</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><span class="stars">★★★</span></td>
+      <td><strong>ZEC</strong></td>
+      <td><span class="badge badge-long">做多</span></td>
+      <td class="up">67%</td>
+      <td>BB 16% 超卖 + 买方流量 50.8% + Grayscale Q2 催化</td>
+    </tr>
+    <tr>
+      <td><span class="stars">★★★</span></td>
+      <td><strong>ETH</strong></td>
+      <td><span class="badge badge-long">做多</span></td>
+      <td class="up">66%</td>
+      <td>BB 2% 极限超卖 + ETF 机构资金持续流入</td>
+    </tr>
+    <tr>
+      <td><span class="stars">★★</span></td>
+      <td><strong>TAO</strong></td>
+      <td><span class="badge badge-short">做空</span></td>
+      <td class="down">36%</td>
+      <td>趋势向下 + 持仓中，已超 TP1，继续持有</td>
+    </tr>
+    <tr>
+      <td><span class="stars">★★</span></td>
+      <td><strong>SOL</strong></td>
+      <td><span class="badge badge-short">做空</span></td>
+      <td class="down">35%</td>
+      <td>L/S 1.73 拥挤多头，持仓中</td>
+    </tr>
+    <tr>
+      <td><span class="stars">★</span></td>
+      <td><strong>DOGE</strong></td>
+      <td><span class="badge badge-neutral">观望</span></td>
+      <td class="neutral">39%</td>
+      <td>L/S 2.91 极度多头，等待反转信号确认</td>
+    </tr>
+    <tr>
+      <td>—</td>
+      <td><strong>BTC</strong></td>
+      <td><span class="badge badge-neutral">观望</span></td>
+      <td class="neutral">45%</td>
+      <td>无明确方向，等回调 $79,500</td>
+    </tr>
+    <tr>
+      <td>—</td>
+      <td><strong>CAKE</strong></td>
+      <td>—</td>
+      <td>—</td>
+      <td>OI $7.2M 流动性太低，本期跳过</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<!-- Advice -->
+<div class="section-title">📋 操作建议</div>
+<div class="alert-box" style="margin-bottom:14px">
+  持有现有仓位，不追加，不平仓。以 7 天为周期统计分析后再优化。
+</div>
+<div class="advice-list">
+  <div class="advice-item">
+    <div class="advice-num">1</div>
+    <div class="advice-content">
+      <div class="advice-title" style="color:var(--green)">TAO SHORT — 继续持有等 TP2</div>
+      已超 TP1 $316.60，当前盈利 $16.49 (+5.2%)。继续持有等待 TP2 区域 $305-308。若反弹至 $317 则考虑减半仓位。
+    </div>
+  </div>
+  <div class="advice-item">
+    <div class="advice-num">2</div>
+    <div class="advice-content">
+      <div class="advice-title" style="color:var(--green)">SOL SHORT — 持仓向好</div>
+      市价 $95.03 vs 入场 $95.43，盈利 $4.46 (+1.4%)。等待 $92 支撑位方向确认，TP1 在线。
+    </div>
+  </div>
+  <div class="advice-item">
+    <div class="advice-num">3</div>
+    <div class="advice-content">
+      <div class="advice-title" style="color:var(--yellow)">BTC 挂单 — 维持等待</div>
+      市价 $80,655，距 $79,577 约 1.34%。若 48h 内未成交，评估是否撤单。
+    </div>
+  </div>
+  <div class="advice-item">
+    <div class="advice-num">4</div>
+    <div class="advice-content">
+      <div class="advice-title" style="color:var(--accent)">ETH / ZEC 做多 — 下轮优先</div>
+      信号最强（P=66%/67%），账户当前未配置。下一次信号轮换时优先考虑入场。
+    </div>
+  </div>
+  <div class="advice-item">
+    <div class="advice-num">5</div>
+    <div class="advice-content">
+      <div class="advice-title" style="color:var(--yellow)">DOGE — 密切跟踪</div>
+      L/S 2.91 极度拥挤多头。若做空信号出现立即响应，潜在高回报做空机会。
+    </div>
+  </div>
+</div>
+
+<footer>
+  生成时间: 2026-05-12 21:23 UTC &nbsp;|&nbsp; 数据源: Binance · OKX · Bybit · Gate.io · Kraken · CoinGecko &nbsp;|&nbsp; Super Mario Crypto Signal Engine v2
+</footer>
+
+</div><!-- /wrap -->
+</body>
+</html>
