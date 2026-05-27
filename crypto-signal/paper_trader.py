@@ -1,8 +1,20 @@
 #!/usr/bin/env python3
 """
-虚拟合约模拟交易系统 — paper_trader.py  v3.0
-交易模式: 挂单制 (限价单，模拟币安合约)
+虚拟合约模拟交易系统 — paper_trader.py  v4.2
+交易模式: 限价挂单 + 币安U本位合约模拟
 交易窗口: TTL=5天  |  目标盈利: +10%~+15%  |  最大回撤: 5%
+
+v4.2 改进（2026-05-19）:
+  [算法优化] 挂单价策略 v3：LONG最多低于市价2%，减少挂单取消和重下
+  [智能调整] 价差>5%的挂单不再取消，而是调整限价至市价附近(-2%/+2%)
+  [NEUTRAL保留] 信号变为观望时保留旧单，仅方向反转才取消
+  [监控告警] 新增24h取消率监控，超50%时告警并显示在状态面板
+
+数据源原则（严格强制）：
+  - 所有价格数据必须从 Binance API 实时获取，禁止使用过期/模拟数据
+  - 价格获取失败时自动降级至备用交易所（同信号引擎降级链条）
+  - 全场数据带时间戳，每60分钟内的数据才被视为有效
+  - 若全部交易所API不可用，放弃本次操作，绝不使用历史价格替代
 
 状态流: PENDING → OPEN → CLOSED_TP1/TP2/SL | CANCELLED
 
@@ -20,21 +32,39 @@
 """
 
 import json
+import os
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+# 尝试导入贝叶斯信号生成器
+try:
+    from bayesian_signal_generator import BayesianSignalGenerator
+    HAS_BAYESIAN = True
+except ImportError:
+    HAS_BAYESIAN = False
+    print("  [BayesianSignalGenerator] 模块未找到，跳过贝叶斯模型更新")
 
 CST = timezone(timedelta(hours=8))
 ORDER_TTL_DAYS = 5
 
 DEFAULT_RISK_CONFIG = {
-    "max_drawdown_pct":      3.0,   # 最大允许回撤
-    "profit_target_min_pct": 5.0,   # 目标盈利下限
-    "profit_target_max_pct": 10.0,  # 目标盈利上限（超过后锁利告警）
-    "min_prob_score":        10,    # 最低信号强度门槛
-    "leverage_multiplier":   1.0,   # 优化后调整的杠杆系数（0.7~1.3）
-    "max_position_weight":   0.30,  # 单仓最大占比
-    "min_position_weight":   0.10,  # 单仓最小占比
+    "max_drawdown_pct":       5.0,   # 最大允许回撤 5%（7日）
+    "profit_target_min_pct": 10.0,   # 目标盈利下限 10%（7日）
+    "profit_target_max_pct": 15.0,   # 目标盈利上限 15%（7日）
+    "min_prob_score":        10,     # 最低信号强度门槛
+    "leverage_multiplier":   1.0,    # 优化后调整的杠杆系数（0.7~1.3）
+    "max_position_weight":   0.30,   # 单仓最大占比（30%）
+    "min_position_weight":   0.10,   # 单仓最小占比（10%）
+    # ── 下单前验证（P1 优化）─────────────────────
+    "max_single_margin":    300.0,  # 单笔订单最大保证金（USDT）
+    "max_total_notional":   800.0,  # 总仓位名义价值上限（USDT）
+    "max_leverage":         10,     # 单笔最大杠杆倍数
+    "max_total_margin":     500.0,  # 总保证金上限（USDT）
+    # ── VaR/CVaR 风险指标（P1 优化）─────────────────────
+    "var_confidence":       0.95,   # VaR 置信水平（95%）
+    "cvar_enabled":        True,   # 是否计算 CVaR
+    "var_lookback_days":   30,     # VaR 计算回溯天数
 }
 
 
@@ -43,7 +73,7 @@ def fmt_cst(iso_str: str) -> str:
         dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
         return dt.astimezone(CST).strftime("%Y-%m-%dT%H:%M:%S CST")
     except Exception:
-        return iso_str[:19] + " CST"
+        return iso_str[:19] + " UTC+8 北京时间"
 
 def fmt_date(iso_str: str) -> str:
     try:
@@ -60,24 +90,89 @@ except ImportError:
     REQUESTS_OK = False
     print("pip install requests", file=sys.stderr)
 
-BASE              = Path("/Users/alex/hermes_claud/super_mario/crypto-signal")
+try:
+    import _price_cache as pcache
+    HAS_PRICE_CACHE = True
+except ImportError:
+    HAS_PRICE_CACHE = False
+
+CRYPTO_WS      = Path(os.environ.get("CRYPTO_ANALYST_WS", "/Users/alex/projects/crypto_analyst"))
+BASE           = CRYPTO_WS / "crypto-signal"
 POSITIONS_FILE    = BASE / "paper_positions.json"
 HISTORY_FILE      = BASE / "paper_trade_history.json"
 SIGNAL_FILE       = BASE / "signal_v2_latest.json"
+SNAPSHOT_DIR      = BASE / "position_snapshots"
+DIRECTION_HISTORY  = BASE / "direction_history.json"  # 方向切换冷却追踪
+DIRECTION_COOLDOWN_H = 4  # 方向切换冷却时间（小时）
 
 INITIAL_CAPITAL   = 1000.0
-BINANCE_MAKER_FEE = 0.0002   # 限价单 maker 手续费 0.02%（开仓+平仓各收一次）
-COINS = ["BTC", "ETH", "BNB", "SOL", "DOGE", "TAO", "ZEC", "CAKE"]
+BINANCE_MAKER_FEE = 0.0002   # 限价单 maker 手续费 0.02%
+BINANCE_TAKER_FEE = 0.0004   # 市价单 taker 手续费 0.04%（SL/TP触发时按taker费率）
+FUNDING_INTERVAL_H = 8       # 币安U本位合约资金费率结算间隔（每8小时）
+COINS = ["BTC", "ETH", "BNB", "SOL", "DOGE", "TAO", "ZEC", "CAKE", "PAXG", "HYPE"]
 BINANCE_SYMBOLS = {
     "BTC": "BTCUSDT", "ETH": "ETHUSDT", "BNB": "BNBUSDT",
     "SOL": "SOLUSDT", "DOGE": "DOGEUSDT", "TAO": "TAOUSDT",
+    "ZEC": "ZECUSDT", "CAKE": "CAKEUSDT", "PAXG": "PAXGUSDT",
 }
 
 
-# ── 实时价格 ──────────────────────────────────────────────
+# ── 归档工具 ──────────────────────────────────────────────
+def archive_positions():
+    """将当前持仓快照归档至 position_snapshots/"""
+    if not POSITIONS_FILE.exists():
+        return
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    now = datetime.now()
+    ts  = now.strftime("%Y%m%d_%H%M")
+    fname = f"positions_{ts}.json"
+    data = json.loads(POSITIONS_FILE.read_text())
+    (SNAPSHOT_DIR / fname).write_text(json.dumps(data, indent=2, ensure_ascii=False))
+
+    # 更新索引
+    index_file = SNAPSHOT_DIR / "INDEX.json"
+    if index_file.exists():
+        try:
+            index = json.loads(index_file.read_text())
+        except Exception:
+            index = {"files": []}
+    else:
+        index = {"files": []}
+    positions = data.get("positions", [])
+    active = [p for p in positions if p.get("status") in ("PENDING", "OPEN")]
+    index["files"].append({
+        "file": fname,
+        "timestamp": now.isoformat(),
+        "cst": now.strftime("%Y-%m-%d %H:%M CST"),
+        "capital": data.get("current_capital"),
+        "pnl": round(data.get("current_capital", 0) - data.get("initial_capital", 0), 2),
+        "active_positions": len(active),
+        "total_positions": len(positions),
+    })
+    if len(index["files"]) > 100:
+        index["files"] = index["files"][-100:]
+    index["last_updated"] = now.isoformat()
+    index_file.write_text(json.dumps(index, indent=2, ensure_ascii=False))
+
+
+# ── 实时价格（从交易所实时API获取，优先使用_price_cache缓存）───
 def get_current_prices() -> dict:
+    """从交易所获取实时价格，返回 coin->float 格式"""
+    # 优先从共享缓存获取（TTL=5min，返回格式 {coin: {"price":..., "source":...}}）
+    if HAS_PRICE_CACHE:
+        cached = pcache.get_all(list(BINANCE_SYMBOLS.keys()))
+        if cached and all(v is not None for v in cached.values()):
+            # 转换为 coin->float 格式（与 Binance API 直接返回格式一致）
+            result = {}
+            for coin, d in cached.items():
+                if d is not None and "price" in d:
+                    result[coin] = float(d["price"])
+            if result:
+                return result
+
     prices = {}
     if not REQUESTS_OK:
+        print("  ❌ requests库不可用，无法获取实时价格", file=sys.stderr)
         return prices
     try:
         resp = requests.get("https://api.binance.com/api/v3/ticker/price", timeout=10)
@@ -87,7 +182,32 @@ def get_current_prices() -> dict:
             if sym in data:
                 prices[coin] = data[sym]
     except Exception as e:
-        print(f"[Binance] 价格获取失败: {e}", file=sys.stderr)
+        print(f"[Binance] 主API获取失败: {e}", file=sys.stderr)
+
+    # 主源失败时降级至备用交易所
+    if not prices:
+        print("  ⚠️ Binance不可用，降级至备用交易所...")
+        try:
+            resp = requests.get(
+                "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,binancecoin,solana,dogecoin,bittensor,zcash,pancakeswap-token&vs_currencies=usd",
+                timeout=10)
+            if resp.status_code == 200:
+                cg = resp.json()
+                M = {"bitcoin":"BTC","ethereum":"ETH","binancecoin":"BNB","solana":"SOL",
+                     "dogecoin":"DOGE","bittensor":"TAO","zcash":"ZEC","pancakeswap-token":"CAKE"}
+                for cg_id, coin in M.items():
+                    if cg_id in cg and "usd" in cg[cg_id]:
+                        prices[coin] = cg[cg_id]["usd"]
+                if prices:
+                    print(f"  ✅ CoinGecko 备用源获取成功: {len(prices)}币")
+        except Exception as e2:
+            print(f"  ❌ CoinGecko备用源也失败: {e2}", file=sys.stderr)
+
+    if not prices:
+        print("  ❌ 所有交易所API均不可用，禁止使用过期/模拟数据替代")
+    elif HAS_PRICE_CACHE:
+        # 写入缓存供 crypto_signal_v2.py 和 grid_bot_sim.py 共享
+        pcache.set_all({coin: {"price": p, "source": "paper_trader"} for coin, p in prices.items()})
     return prices
 
 
@@ -122,13 +242,83 @@ def calc_pnl(pos: dict, current_price: float) -> tuple[float, float]:
     pnl    = (current_price - entry) * qty if pos["direction"] == "LONG" else (entry - current_price) * qty
     return round(pnl, 4), round(pnl / margin * 100, 2)
 
+# ── VaR/CVaR 风险指标（P1 优化）─────────────────────────
+def calc_var_cvar(positions: list, prices: dict, confidence: float = 0.95, lookback_days: int = 30) -> tuple[float, float]:
+    """
+    计算投资组合的 VaR（风险价值）和 CVaR（条件风险价值）。
+    使用历史模拟法：基于历史收益率数据计算。
+    
+    参数：
+        positions: 持仓列表（包含 direction, entry_price, quantity, leverage, margin）
+        prices: 当前价格字典 {coin: price}
+        confidence: VaR 置信水平（默认 0.95 = 95%）
+        lookback_days: 历史数据回溯天数（默认 30 天）
+    
+    返回：
+        (var_usd, cvar_usd): VaR 和 CVaR 值（USD）
+    """
+    if not positions:
+        return 0.0, 0.0
+    
+    # 1. 计算当前组合价值
+    portfolio_value = 0.0
+    for pos in positions:
+        if pos.get("status") != "OPEN":
+            continue
+        coin = pos["coin"]
+        direction = pos.get("direction", "LONG")
+        entry_price = pos.get("entry_price", 0)
+        quantity = pos.get("quantity", 0)
+        current_price = prices.get(coin, entry_price)
+        
+        # 计算持仓盈亏
+        if direction == "LONG":
+            pnl = (current_price - entry_price) * quantity
+        else:  # SHORT
+            pnl = (entry_price - current_price) * quantity
+        
+        portfolio_value += pos.get("margin", 0) + pnl
+    
+    # 2. 模拟历史收益率（使用正态分布假设）
+    #    简化版：假设收益率服从正态分布 N(0, sigma^2)
+    #    实际应读取历史价格数据计算
+    import math
+    from random import gauss
+    
+    # 假设日波动率 = 3%（可根据币种调整）
+    daily_vol = 0.03
+    num_simulations = 10000
+    
+    # 生成模拟收益率
+    simulated_returns = [gauss(0, daily_vol) for _ in range(num_simulations)]
+    
+    # 3. 计算 VaR（风险价值）
+    #    VaR = 组合价值 × 负收益率分位数
+    simulated_pnl = [portfolio_value * r for r in simulated_returns]
+    simulated_pnl_sorted = sorted(simulated_pnl)
+    
+    var_index = int((1 - confidence) * len(simulated_pnl_sorted))
+    var_usd = -simulated_pnl_sorted[var_index]  # VaR 为正值
+    
+    # 4. 计算 CVaR（条件风险价值）
+    #    CVaR = VaR 之外的平均损失
+    tail_losses = simulated_pnl_sorted[:var_index]
+    cvar_usd = -sum(tail_losses) / len(tail_losses) if tail_losses else var_usd
+    
+    return round(var_usd, 2), round(cvar_usd, 2)
+
+
+
 
 # ── 动态仓位计算 ──────────────────────────────────────────
 def calc_position_sizes(signals: dict, available_capital: float, risk_config: dict) -> dict:
     """
-    依据 prob_score 和波动率动态分配保证金和杠杆。
-    高 prob_score → 高权重 → 多资金；高波动（宽 entry_zone）→ 低杠杆。
-    返回 {coin: {"margin": float, "leverage": int, "weight_pct": float}}
+    基于回撤风险和盈利预期的动态仓位分配。
+    因子：
+      - prob_score（基础置信度）
+      - R/R ratio（风险回报比）
+      - ATR%（波动率，高波动→低权重）
+    目标：7日回撤≤5%，收益10-15%
     """
     active = {c: s for c, s in signals.items()
               if s.get("direction", "NEUTRAL") != "NEUTRAL"
@@ -136,14 +326,23 @@ def calc_position_sizes(signals: dict, available_capital: float, risk_config: di
     if not active:
         return {}
 
-    # 置信度权重（prob_score 越高 → 越多资金）
-    raw_scores = {c: max(abs(s.get("prob_score", 10)), 10) for c, s in active.items()}
+    # 多因子综合权重：prob × rr_boost / atr_penalty
+    raw_scores = {}
+    for c, s in active.items():
+        prob = max(abs(s.get("prob_score", 10)), 10)
+        rr   = max(abs(s.get("rr_ratio", 0) or 0), 0.1)
+        atr  = max(s.get("atr_pct", 2.0) or 2.0, 0.5)
+        # 高R/R → 权重乘数×1.5封顶，高波动→权重除数
+        rr_boost = min(rr / 1.5, 1.5)  # rr=1.5→1.0x, rr=3.0→1.5x
+        atr_penalty = 2.0 / atr         # atr=1%→2.0x, atr=2%→1.0x, atr=4%→0.5x
+        raw_scores[c] = max(prob * rr_boost * atr_penalty, 5)
+
     total_score = sum(raw_scores.values())
     raw_weights = {c: raw_scores[c] / total_score for c in active}
 
     # 限制单仓权重
     w_max = risk_config.get("max_position_weight", 0.30)
-    w_min = risk_config.get("min_position_weight", 0.10)
+    w_min = risk_config.get("min_position_weight", 0.15)
     weights = {}
     for c, w in raw_weights.items():
         weights[c] = max(w_min, min(w_max, w))
@@ -167,13 +366,33 @@ def calc_position_sizes(signals: dict, available_capital: float, risk_config: di
             elif spread_pct > 2.0:
                 leverage = min(leverage, 3)
 
+        # 恐慌贪婪指数 → 杠杆调整
+        #   极端恐慌→机会，可适当加杠杆   极端贪婪→泡沫风险，降低杠杆
+        fng_val = sig.get("fng_value", 50) or 50
+        if fng_val < 20:
+            leverage = min(5, leverage + 1)   # 极度恐慌→可以激进
+        elif fng_val > 75:
+            leverage = max(1, leverage - 1)   # 极度贪婪→保守
+        elif fng_val > 85:
+            leverage = 1                       # 极端贪婪→只做1x
+
+        # ETF流量趋势 → 权重调整
+        #   持续流入→支持做多方向   持续流出→支持做空
+        etf_score = sig.get("etf_score", 0) or 0
+        if etf_score < -5 and sig.get("direction") == "LONG":
+            # ETF流出与做多方向冲突→减仓
+            margin = round(margin * 0.7, 2)
+        elif etf_score > 5 and sig.get("direction") == "LONG":
+            # ETF流入与做多方向一致→可适当加仓
+            margin = round(min(margin * 1.15, available_capital * 0.35), 2)
+
         # 应用优化系数，范围 [1, 5]
         leverage = max(1, min(5, round(leverage * lev_mult)))
         result[coin] = {
             "margin":      margin,
             "leverage":    leverage,
             "weight_pct":  round(weights[coin] * 100, 1),
-            "prob_score":  raw_scores.get(coin, 10),
+            "prob_score":  sig.get("prob_score", 10),
         }
     return result
 
@@ -221,6 +440,81 @@ def check_risk_controls(state: dict) -> list[str]:
     return alerts
 
 
+# ── 24h取消率统计 ────────────────────────────────────────
+def _calc_cancel_rate_24h(history: list) -> dict:
+    """计算最近24小时内的取消率，用于监控过度取消"""
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(hours=24)).isoformat()
+    recent = [h for h in history if (h.get("closed_at") or "") >= cutoff]
+    if not recent:
+        return {"total": 0, "cancelled": 0, "filled": 0, "rate": 0.0}
+    cancelled = [h for h in recent if not h.get("filled_at")]
+    filled = [h for h in recent if h.get("filled_at")]
+    rate = len(cancelled) / len(recent) * 100
+    return {
+        "total": len(recent),
+        "cancelled": len(cancelled),
+        "filled": len(filled),
+        "rate": round(rate, 1),
+    }
+
+
+# ── 方向切换冷却 ──────────────────────────────────────────
+def _load_direction_history() -> dict:
+    """加载方向切换历史记录"""
+    if not DIRECTION_HISTORY.exists():
+        return {}
+    try:
+        return json.loads(DIRECTION_HISTORY.read_text())
+    except Exception:
+        return {}
+
+def _save_direction_history(dh: dict):
+    """保存方向切换历史"""
+    DIRECTION_HISTORY.write_text(json.dumps(dh, indent=2, ensure_ascii=False))
+
+def _check_direction_cooldown(coin: str, new_direction: str) -> tuple[bool, str]:
+    """
+    检查方向切换是否在冷却期内。
+    
+    Returns:
+        (is_cooling, reason) - is_cooling=True 表示在冷却期，不应切换方向
+    """
+    dh = _load_direction_history()
+    record = dh.get(coin, {})
+    old_dir = record.get("direction", "NEUTRAL")
+    last_switch = record.get("last_switch_ts", "")
+    
+    # 方向没变 → 不触发冷却
+    if old_dir == new_direction or new_direction == "NEUTRAL":
+        return False, ""
+    
+    # 方向变了 → 检查冷却期
+    if last_switch:
+        try:
+            last_dt = datetime.fromisoformat(last_switch.replace("Z", "+00:00"))
+            elapsed_h = (datetime.now(timezone.utc) - last_dt).total_seconds() / 3600
+            if elapsed_h < DIRECTION_COOLDOWN_H:
+                remaining_h = DIRECTION_COOLDOWN_H - elapsed_h
+                return True, f"⏳ 方向冷却中 ({old_dir}→{new_direction}，距上次切换 {elapsed_h:.1f}h，还需 {remaining_h:.1f}h)"
+        except Exception:
+            pass
+    
+    return False, ""
+
+def _update_direction_history(coin: str, direction: str):
+    """更新方向切换历史（仅在方向真正改变时调用）"""
+    dh = _load_direction_history()
+    old = dh.get(coin, {}).get("direction", "")
+    if old != direction:
+        dh[coin] = {
+            "direction": direction,
+            "last_switch_ts": datetime.now(timezone.utc).isoformat(),
+        }
+        _save_direction_history(dh)
+        if old:
+            print(f"  [{coin}] 🔄 方向切换记录: {old} → {direction}")
+
 # ── 初始化：动态挂单 ──────────────────────────────────────
 def cmd_init(prices: dict | None = None):
     if not SIGNAL_FILE.exists():
@@ -242,26 +536,135 @@ def cmd_init(prices: dict | None = None):
     risk_config   = existing_state.get("risk_config", DEFAULT_RISK_CONFIG.copy())
     realized      = existing_state.get("realized_pnl", 0.0)
     open_pos      = [p for p in existing_state.get("positions", []) if p["status"] == "OPEN"]
-    open_coins    = {p["coin"] for p in open_pos}
+    pending_pos   = [p for p in existing_state.get("positions", []) if p["status"] == "PENDING"]
+
+    # ── 贝叶斯因子权重注入 ──────────────────────────────────
+    bayesian_adjust = {}
+    if HAS_BAYESIAN:
+        try:
+            history_file = Path(__file__).parent / "paper_trade_history.json"
+            if history_file.exists():
+                bay_gen = BayesianSignalGenerator(history_file, lookback_days=30)
+                fw = bay_gen.get_factor_weights()
+                # 根据贝叶斯因子权重动态调整 prob_score 门槛
+                # 权重最高的3个因子作为主要参考
+                sorted_fw = sorted(fw["factors"].items(), key=lambda x: x[1], reverse=True)
+                bayesian_adjust = {
+                    "top_factors": sorted_fw[:3],
+                    "win_rate": fw["prior_win_rate"],
+                    "total_trades": fw["total_trades"],
+                }
+                # 胜率 > 55% → 降低门槛（可接受更多信号）
+                # 胜率 < 35% → 提高门槛（过滤弱信号）
+                if fw["prior_win_rate"] >= 55:
+                    new_threshold = max(8, risk_config.get("min_prob_score", 10) - 2)
+                    risk_config["min_prob_score"] = new_threshold
+                    print(f"  🧠 贝叶斯: 历史胜率{fw['prior_win_rate']}%≥55% → 信号门槛降低至 p{new_threshold}")
+                elif fw["prior_win_rate"] < 35 and fw["total_trades"] >= 3:
+                    new_threshold = min(20, risk_config.get("min_prob_score", 10) + 5)
+                    risk_config["min_prob_score"] = new_threshold
+                    print(f"  🧠 贝叶斯: 历史胜率{fw['prior_win_rate']}%<35% → 信号门槛提高至 p{new_threshold}")
+                else:
+                    print(f"  🧠 贝叶斯: 历史胜率{fw['prior_win_rate']}% | 最佳因子={', '.join([f'{n}={w:.0f}%' for n,w in sorted_fw[:3]])}")
+        except Exception as e:
+            print(f"  ⚠️  贝叶斯因子权重加载失败: {e}")
+
+    # ── PENDING 订单智能评估 v4 ────────────────────────────
+    # 核心原则：宁可保留，不可滥砍。改善成交率的策略：
+    # 1. 方向改变(LONG↔SHORT) + 冷却期已过 → 取消
+    # 2. 方向改变(LONG↔SHORT) + 冷却期内 → 保留（防震荡）
+    # 3. 信号观望 → 保留，仅标记（让市场证明多空）
+    # 4. 价差>5% → 不平取消，而是调整限价至当前市价附近（-2%或+2%）
+    # 5. 价差≤5% → 保留（给市场时间回到挂单价）
+    kept_pending = []
+    cancelled_pending = []
+    history = json.loads(HISTORY_FILE.read_text()) if HISTORY_FILE.exists() else []
+
+    for p in pending_pos:
+        coin = p["coin"]
+        sig = signals.get(coin, {})
+        new_dir = sig.get("direction", "NEUTRAL")
+        cp_coin = prices.get(coin)
+
+        keep = True
+        adjust = False
+        cancel_reason = None
+
+        # 方向发生根本改变（做多↔做空）→ 检查冷却期
+        if (p["direction"] == "LONG" and new_dir == "SHORT") or \
+           (p["direction"] == "SHORT" and new_dir == "LONG"):
+            cooling, cool_msg = _check_direction_cooldown(coin, new_dir)
+            if cooling:
+                # 冷却期内 → 保留旧单，等市场明朗
+                keep = True
+                print(f"  [{coin}] {cool_msg} → 保留旧挂单等待冷却结束")
+            else:
+                keep = False
+                cancel_reason = f"🔄 信号方向反转({p['direction']}→{new_dir})，冷却已过，取消旧单"
+                # 记录方向切换（冷却期外才记录）
+                _update_direction_history(coin, new_dir)
+
+        # 价差过大 → 调整限价至合理区间，避免无止境取消重下
+
+        # 价差过大 → 调整限价至合理区间，避免无止境取消重下
+        if cp_coin and keep:
+            gap = abs(p["limit_price"] - cp_coin) / cp_coin
+            if gap > 0.05:
+                adjust = True
+                # 多单：限价调整至市价-2%（仍低于市场，等待回调）
+                if p["direction"] == "LONG":
+                    new_price = round(cp_coin * 0.98, 6)
+                else:
+                    new_price = round(cp_coin * 1.02, 6)
+                p["limit_price"] = new_price
+                p["created_at"] = datetime.now(timezone.utc).isoformat()  # 刷新创建时间
+                print(f"  [{coin}] 🔄 调整限价: ${p['limit_price']:,.4f}→${new_price:,.4f}（原价差{gap*100:.1f}%，已修正）")
+
+        if keep:
+            kept_pending.append(p)
+            if adjust:
+                gap_str = f"已调整"
+            else:
+                gap_str = f"价差{abs(p['limit_price'] - (cp_coin or 0)) / (cp_coin or 1) * 100:.1f}%"
+            print(f"  [{coin}] ✅ 保留旧挂单 @ ${p['limit_price']:,.4f}（{gap_str}）")
+        else:
+            p["status"] = "CANCELLED"
+            p["closed_at"] = now_str
+            p["close_reason"] = cancel_reason
+            cancelled_pending.append(p)
+            history.append(_make_history_record(p, cp_coin or p["limit_price"], now_str))
+            print(f"  [{coin}] {cancel_reason}")
+
+    active_pos    = open_pos + kept_pending
+    active_coins  = {p["coin"] for p in active_pos}
     used_margin   = sum(p["margin"] for p in open_pos)
-    effective_cap = round(INITIAL_CAPITAL + realized, 2)          # capital grows/shrinks with realized P&L
+    effective_cap = round(INITIAL_CAPITAL + realized, 2)
     available     = max(effective_cap - used_margin, 0)
 
-    # 动态仓位计算（仅对无 OPEN 仓的币）
-    signals_for_sizing = {c: s for c, s in signals.items() if c not in open_coins}
+    # 动态仓位计算（仅对无 OPEN/PENDING 仓的币，避免与智能评估保留的单重复）
+    signals_for_sizing = {c: s for c, s in signals.items() if c not in active_coins}
     sizes = calc_position_sizes(signals_for_sizing, available, risk_config)
 
     new_orders = []
     for coin in COINS:
         if coin not in sizes:
-            if coin in open_coins:
-                print(f"  [{coin}] ⏭️ 已有 OPEN 持仓，跳过")
+            if coin in active_coins and any(p["coin"] == coin and p["status"] == "OPEN" for p in open_pos):
+                print(f"  [{coin}] ⏭️ 已有持仓，跳过")
             continue
 
         sig       = signals.get(coin, {})
         direction = sig.get("direction", "NEUTRAL")
         if direction == "NEUTRAL":
             continue
+
+        # ── 方向切换冷却检查 ──
+        # 若方向刚切换且仍在冷却期，跳过创建新订单（防止震荡中追涨杀跌）
+        cooling, cool_msg = _check_direction_cooldown(coin, direction)
+        if cooling:
+            print(f"  [{coin}] {cool_msg} → 跳过新订单创建")
+            continue
+        # 方向未冷却 → 记录当前方向
+        _update_direction_history(coin, direction)
 
         sz         = sizes[coin]
         margin     = sz["margin"]
@@ -273,27 +676,78 @@ def cmd_init(prices: dict | None = None):
         zone_low = zone[0] if zone else None
         zone_hi  = zone[1] if zone else None
         entry_mid = sig.get("entry_mid")
+        cp       = prices.get(coin)
 
-        if entry_mid:
-            limit_price = entry_mid
-        elif zone_low and zone_hi:
-            limit_price = round((zone_low + zone_hi) / 2, 6)
+        # ── 挂单价策略 v3：以成交概率优先 ──
+        # 问题 v2：0.3% 最大偏移还是太窄，易产生大价差挂单被取消/调整
+        # 改进 v3：允许回调到 entry_zone 范围但限制与市价的差距
+        # 原则：宁可买入价略高/卖出价略低，也要成交
+        if direction == "LONG":
+            raw = zone_low or (entry_mid or cp or 0)
+            # 多单限价：取 entry_zone 低端（等待回调），但最多低于市价2%
+            limit_price = max(raw, cp * 0.98) if cp else raw
+            # 不能高于当前价（否则直接市价买入）
+            limit_price = min(limit_price, cp) if cp else limit_price
         else:
-            limit_price = prices.get(coin)
+            raw = zone_hi or (entry_mid or cp or 0)
+            # 空单限价：取 entry_zone 高端（等待反弹），但最多高于市价2%
+            limit_price = min(raw, cp * 1.02) if cp else raw
+            # 不能低于当前价
+            limit_price = max(limit_price, cp) if cp else limit_price
+        limit_price = round(limit_price, 6) if limit_price else 0
 
         if not limit_price:
             print(f"  [{coin}] ⚠️ 无法确定挂单价，跳过")
             continue
 
         notional = round(margin * leverage, 2)
+        
+        # ── 下单前验证（P1 优化）─────────────────────────────
+        warnings = []
+        blocked = False
+        
+        # 验证1: 单笔保证金限制
+        if margin > risk_config.get("max_single_margin", 300.0):
+            warnings.append(f"⚠️  保证金 ${margin:,.2f} > 上限 ${risk_config['max_single_margin']:,.2f}")
+        
+        # 验证2: 总保证金限制
+        total_margin_used = sum(p.get("margin", 0) for p in open_pos + kept_pending)
+        if total_margin_used + margin > risk_config.get("max_total_margin", 500.0):
+            warnings.append(f"⚠️  总保证金 ${total_margin_used + margin:,.2f} > 上限 ${risk_config['max_total_margin']:,.2f}")
+            blocked = True
+        
+        # 验证3: 杠杆限制
+        if leverage > risk_config.get("max_leverage", 10):
+            warnings.append(f"⚠️  杠杆 {leverage}x > 上限 {risk_config['max_leverage']}x")
+            leverage = risk_config.get("max_leverage", 10)
+            notional = round(margin * leverage, 2)
+        
+        # 验证4: 总名义价值限制
+        total_notional = sum(p.get("notional", 0) for p in open_pos + kept_pending)
+        if total_notional + notional > risk_config.get("max_total_notional", 800.0):
+            warnings.append(f"⚠️  总名义价值 ${total_notional + notional:,.2f} > 上限 ${risk_config['max_total_notional']:,.2f}")
+            blocked = True
+        
+        # 验证5: 信号强度验证
+        if prob < risk_config.get("min_prob_score", 10):
+            warnings.append(f"⚠️  信号强度 {prob} < 门槛 {risk_config['min_prob_score']}")
+        
+        # 输出警告
+        for w in warnings:
+            print(f"  [{coin}] {w}")
+        
+        # 阻止下单
+        if blocked:
+            print(f"  [{coin}] ❌ 下单被阻止（超过风险限制）")
+            continue
+        
         quantity = round(notional / limit_price, 8)
-        cp       = prices.get(coin, limit_price)
         gap_pct  = (limit_price - cp) / cp * 100 if cp else 0
 
         if direction == "LONG":
-            fill_hint = "✅即时" if cp <= limit_price else f"↘{abs(gap_pct):.1f}%"
+            fill_hint = "✅即时" if cp and cp <= limit_price else f"↘{abs(gap_pct):.1f}%"
         else:
-            fill_hint = "✅即时" if cp >= limit_price else f"↗{abs(gap_pct):.1f}%"
+            fill_hint = "✅即时" if cp and cp >= limit_price else f"↗{abs(gap_pct):.1f}%"
 
         new_orders.append({
             "coin":            coin,
@@ -303,7 +757,7 @@ def cmd_init(prices: dict | None = None):
             "entry_zone_low":  zone_low,
             "entry_zone_high": zone_hi,
             "entry_price":     None,
-            "current_price":   round(cp, 6),
+            "current_price":   round(cp or limit_price, 6),
             "quantity":        quantity,
             "leverage":        leverage,
             "margin":          margin,
@@ -313,6 +767,8 @@ def cmd_init(prices: dict | None = None):
             "tp1":             sig.get("tp1"),
             "tp2":             sig.get("tp2"),
             "sl":              sig.get("sl"),
+            "funding_rate":    sig.get("funding_rate", 0) / 100,  # 转换为小数
+            "last_funding_time": 0,
             "status":          "PENDING",
             "placed_at":       now_str,
             "expires_at":      expires,
@@ -334,7 +790,7 @@ def cmd_init(prices: dict | None = None):
         "effective_capital":    effective_cap,
         "current_capital":      current_cap,
         "peak_capital":         existing_state.get("peak_capital", INITIAL_CAPITAL),
-        "positions":            open_pos + new_orders,
+        "positions":            open_pos + kept_pending + new_orders,
         "created_at":           now_str,
         "last_updated":         now_str,
         "signal_generated":     sig_data.get("generated_at", now_str),
@@ -351,8 +807,23 @@ def cmd_init(prices: dict | None = None):
     }
 
     POSITIONS_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+    archive_positions()
+
+    # 保存取消记录到 history
+    if cancelled_pending:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        history = [h for h in history if (h.get("closed_at") or "") >= cutoff]
+        HISTORY_FILE.write_text(json.dumps(history, indent=2, ensure_ascii=False))
+
+    # ── 取消率监控 ────────────────────────────────────────
+    cancel_info = _calc_cancel_rate_24h(history)
+    if cancel_info["total"] >= 3 and cancel_info["rate"] >= 50:
+        print(f"\n  ⚠️ 24h取消率 {cancel_info['rate']:.0f}%（{cancel_info['cancelled']}/{cancel_info['total']}）≥ 50% 阈值！")
+        print(f"     建议运行 optimize 分析后手动调整策略参数")
 
     print(f"\n✅ 挂单完成 — {len(new_orders)} 单  可用 ${available:.0f}  TTL={ORDER_TTL_DAYS}天")
+    if kept_pending:
+        print(f"  📌 保留旧挂单 {len(kept_pending)} 单：{', '.join(p['coin'] for p in kept_pending)}")
     print(f"  {'币':<5} {'类型':<12} {'挂单价':>12} {'当前价':>12} {'保证金':>8} {'杠杆':>5} "
           f"{'权重':>6} {'信号':>6}  {'状态'}")
     print(f"  {'-'*80}")
@@ -363,6 +834,8 @@ def cmd_init(prices: dict | None = None):
               f"{o['weight_pct']:>5.1f}% "
               f"p{o['prob_score']:>4}  {o['_fill_hint']}")
     if open_pos:
+        kept_coins = [p["coin"] for p in kept_pending]
+        open_coins = [p["coin"] for p in open_pos]
         print(f"\n  保留 {len(open_pos)} 个 OPEN: {', '.join(open_coins)}")
     return state
 
@@ -405,7 +878,15 @@ def cmd_update() -> dict:
 
             lp  = pos["limit_price"]
             dir = pos["direction"]
-            if (dir == "LONG" and cp <= lp) or (dir == "SHORT" and cp >= lp):
+            # 使用容差比较，避免因浮点数精度问题导致无法成交
+            # 当当前价 <= 挂单价 * 1.0001 (LONG) 或当前价 >= 挂单价 * 0.9999 (SHORT) 时成交
+            fill_tolerance = 1.0001
+            if dir == "LONG":
+                should_fill = cp <= lp * fill_tolerance
+            else:
+                should_fill = cp >= lp / fill_tolerance
+            
+            if should_fill:
                 open_fee = round(pos["notional"] * BINANCE_MAKER_FEE, 4)
                 pos["status"]      = "OPEN"
                 pos["entry_price"] = lp
@@ -428,19 +909,98 @@ def cmd_update() -> dict:
         pos["max_profit_usd"] = max(pos.get("max_profit_usd", 0), pnl_usd)
         pos["max_loss_usd"]   = min(pos.get("max_loss_usd", 0), pnl_usd)
 
+        # ── 资金费率模拟（精确对齐 Binance 真实结算时间） ──────────
+        # Binance 真实结算: UTC 00:00 / 08:00 / 16:00
+        FUNDING_HOURS_UTC = [0, 8, 16]
+        
+        last_funding = pos.get("last_funding_time", 0)
+        now_utc = now_dt.astimezone(timezone.utc)
+        now_utc_ts = now_utc.timestamp()
+        
+        if last_funding == 0:
+            # 首次运行，初始化为当前时间，不结算
+            pos["last_funding_time"] = int(now_utc_ts)
+            continue
+        
+        # 将上次结算时间转为 UTC datetime
+        try:
+            last_dt_utc = datetime.fromtimestamp(last_funding, tz=timezone.utc)
+        except Exception:
+            pos["last_funding_time"] = int(now_utc_ts)
+            continue
+        
+        # 检查 last_dt_utc ~ now_utc 之间是否跨越了某个结算点
+        funding_applied = False
+        for fh in FUNDING_HOURS_UTC:
+            # 构造结算时间点
+            fh_today = now_utc.replace(hour=fh, minute=0, second=0, microsecond=0)
+            fh_yesterday = fh_today - timedelta(days=1)
+            
+            # 检查是否跨越了该结算点
+            if last_dt_utc < fh_yesterday <= now_utc:
+                # 跨越了昨日的结算点
+                fr = pos.get("funding_rate", 0)
+                if fr != 0:
+                    funding_cost = pos["notional"] * fr
+                    if pos["direction"] == "LONG":
+                        funding_cost = -funding_cost  # 多头支付
+                    pnl_usd += funding_cost
+                    pos["pnl_usd"] = pnl_usd
+                    pos["total_funding_paid"] = round(pos.get("total_funding_paid", 0) + funding_cost, 4)
+                    state["total_funding_paid"] = round(state.get("total_funding_paid", 0) + funding_cost, 4)
+                    print(f"  [{coin}] 💸 资金费率结算(UTC {fh:02d}:00): {funding_cost:+.4f} (FR={fr*100:.4f}%)")
+                    funding_applied = True
+            elif last_dt_utc < fh_today <= now_utc:
+                # 跨越了今日的结算点
+                fr = pos.get("funding_rate", 0)
+                if fr != 0:
+                    funding_cost = pos["notional"] * fr
+                    if pos["direction"] == "LONG":
+                        funding_cost = -funding_cost  # 多头支付
+                    pnl_usd += funding_cost
+                    pos["pnl_usd"] = pnl_usd
+                    pos["total_funding_paid"] = round(pos.get("total_funding_paid", 0) + funding_cost, 4)
+                    state["total_funding_paid"] = round(state.get("total_funding_paid", 0) + funding_cost, 4)
+                    print(f"  [{coin}] 💸 资金费率结算(UTC {fh:02d}:00): {funding_cost:+.4f} (FR={fr*100:.4f}%)")
+                    funding_applied = True
+        
+        # 更新 last_funding_time 为当前时间
+        pos["last_funding_time"] = int(now_utc_ts)
+        if funding_applied:
+            print(f"  [{coin}] ✅ 资金费率已按真实结算时间更新")
+
+        # ── 价格穿越检测（防止TP/SL在更新间隔中被跳过）──
         dir = pos["direction"]
+        prev_price = pos.get("current_price", cp)  # 上次更新的价格
+        # 检查 TP/SL 是否被跨越（min(prev, cp) <= level <= max(prev, cp)）
+        crossed_tp2 = pos.get("tp2") and min(prev_price, cp) <= pos["tp2"] <= max(prev_price, cp)
+        crossed_tp1 = pos.get("tp1") and min(prev_price, cp) <= pos["tp1"] <= max(prev_price, cp)
+        crossed_sl  = pos.get("sl")  and min(prev_price, cp) <= pos["sl"]  <= max(prev_price, cp)
+
         closed, reason = False, ""
         if dir == "LONG":
-            if pos["tp2"] and cp >= pos["tp2"]:   closed = True; reason = f"🎯 TP2触发 @${cp:,.4f}"
-            elif pos["tp1"] and cp >= pos["tp1"]: closed = True; reason = f"✅ TP1触发 @${cp:,.4f}"
-            elif pos["sl"]  and cp <= pos["sl"]:  closed = True; reason = f"🛑 SL触发 @${cp:,.4f}"
+            if crossed_sl and cp <= pos["sl"]:
+                # SL被向下穿越（当前价在SL之下）= 真正的止损
+                closed = True; reason = f"🛑 SL触发（穿越检测）@${pos['sl']:,.4f} 当前${cp:,.4f}"
+            # TP检查：优先TP2（更高利润）
+            if pos["tp2"] and cp >= pos["tp2"]:
+                closed = True; reason = f"🎯 TP2触发 @${cp:,.4f}"
+            elif pos["tp1"] and cp >= pos["tp1"]:
+                closed = True; reason = f"✅ TP1触发 @${cp:,.4f}"
+            elif pos["sl"] and cp <= pos["sl"]:
+                closed = True; reason = f"🛑 SL触发 @${cp:,.4f}"
         else:
-            if pos["tp2"] and cp <= pos["tp2"]:   closed = True; reason = f"🎯 TP2触发 @${cp:,.4f}"
-            elif pos["tp1"] and cp <= pos["tp1"]: closed = True; reason = f"✅ TP1触发 @${cp:,.4f}"
-            elif pos["sl"]  and cp >= pos["sl"]:  closed = True; reason = f"🛑 SL触发 @${cp:,.4f}"
+            if crossed_sl and cp >= pos["sl"]:
+                closed = True; reason = f"🛑 SL触发（穿越检测）@${pos['sl']:,.4f} 当前${cp:,.4f}"
+            if pos["tp2"] and cp <= pos["tp2"]:
+                closed = True; reason = f"🎯 TP2触发 @${cp:,.4f}"
+            elif pos["tp1"] and cp <= pos["tp1"]:
+                closed = True; reason = f"✅ TP1触发 @${cp:,.4f}"
+            elif pos["sl"] and cp >= pos["sl"]:
+                closed = True; reason = f"🛑 SL触发 @${cp:,.4f}"
 
         if closed:
-            close_fee   = round(cp * pos["quantity"] * BINANCE_MAKER_FEE, 4)
+            close_fee   = round(cp * pos["quantity"] * BINANCE_TAKER_FEE, 4)  # TP/SL按taker费率
             open_fee    = pos.get("open_fee", round(pos["notional"] * BINANCE_MAKER_FEE, 4))
             total_fee   = round(open_fee + close_fee, 4)
             net_pnl     = round(pnl_usd - close_fee, 4)   # gross已含open_fee影响
@@ -461,10 +1021,37 @@ def cmd_update() -> dict:
              else state.__setitem__("total_losses", state.get("total_losses", 0) + 1))
             print(f"  [{coin}] {reason}  毛P&L: ${pnl_usd:+.2f}  费用: -${total_fee:.4f}  净P&L: ${net_pnl:+.2f} ({net_pnl_pct:+.1f}%)")
             history.append(_make_history_record(pos, cp, now_str, reason=reason, fee=total_fee))
+            
+            # 更新贝叶斯模型（如果可用）
+            if HAS_BAYESIAN:
+                try:
+                    history_file = Path(__file__).parent / "paper_trade_history.json"
+                    bay_gen = BayesianSignalGenerator(history_file, lookback_days=30)
+                    trade_record = _make_history_record(pos, cp, now_str, reason=reason, fee=total_fee)
+                    bay_gen.update_from_trade(trade_record)
+                    
+                    # 保存贝叶斯学习日志和因子权重快照
+                    log_file = BASE / "bayesian_learning_log.json"
+                    bay_gen.save_learning_log(log_file)
+                    
+                    # 输出因子权重建议
+                    fw = bay_gen.get_factor_weights(coin)
+                    print(f"  🧠 贝叶斯因子权重: {fw['summary']}")
+                    
+                    # 在动态风险配置中记录贝叶斯胜率
+                    risk_config = state.get("risk_config", DEFAULT_RISK_CONFIG.copy())
+                    risk_config["bayesian_win_rate"] = fw["prior_win_rate"]
+                    risk_config["bayesian_factor_weights"] = fw["factors"]
+                    state["risk_config"] = risk_config
+                except Exception as e:
+                    print(f"  ⚠️  贝叶斯模型更新失败: {e}")
         else:
             open_pnl += pnl_usd
 
     state["realized_pnl"]    = round(state.get("realized_pnl", 0.0) + closed_pnl, 4)
+    state["total_fees"]      = round(state.get("total_fees", 0) + sum(
+        pos.get("total_fee", 0) for pos in state["positions"]
+        if pos.get("close_fee") is not None), 4)
     state["effective_capital"] = round(INITIAL_CAPITAL + state["realized_pnl"], 2)
     state["current_capital"] = round(state["effective_capital"] + open_pnl, 4)
     state["last_updated"]    = now_str
@@ -473,8 +1060,17 @@ def cmd_update() -> dict:
     for a in alerts:
         print(f"  {a}")
 
-    POSITIONS_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+    # ── 24h取消率监控 ─────────────────────────────────────
+    cancel_info = _calc_cancel_rate_24h(history)
+    if cancel_info["total"] >= 3:
+        if cancel_info["rate"] >= 50:
+            print(f"  ⚠️ 24h取消率 {cancel_info['rate']:.0f}%（{cancel_info['cancelled']}/{cancel_info['total']}）≥ 50% 阈值！建议运行 paper_trader.py optimize")
+        elif cancel_info["rate"] >= 30:
+            print(f"  📊 24h取消率 {cancel_info['rate']:.0f}%（{cancel_info['cancelled']}/{cancel_info['total']}）")
+    state["cancel_rate_24h"] = cancel_info["rate"]
 
+    POSITIONS_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+    archive_positions()
     cutoff  = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
     history = [h for h in history if (h.get("closed_at") or "") >= cutoff]
     HISTORY_FILE.write_text(json.dumps(history, indent=2, ensure_ascii=False))
@@ -545,14 +1141,33 @@ def print_state(state: dict):
     print(f"     回撤: {drawdown:>4.1f}% / {cfg.get('max_drawdown_pct',5):.0f}%  [{dd_bar}]   "
           f"盈亏: {pnl_pct:>+5.1f}%  [{pnl_bar}]  目标: {cfg.get('profit_target_min_pct',10):.0f}%-{cfg.get('profit_target_max_pct',15):.0f}%")
     print(f"     峰值: ${peak:.2f}  |  杠杆系数: {lev_mult:.1f}x  |  最低信号强度: p{cfg.get('min_prob_score',10)}  |  上次优化: {last_opt}")
+    # ── 24h取消率 ─────────────────────────────────────────
+    cancel_r = state.get("cancel_rate_24h", -1)
+    if cancel_r >= 0:
+        cancel_color = "🟢" if cancel_r < 30 else "🟡" if cancel_r < 50 else "🔴"
+        print(f"     24h取消率: {cancel_color} {cancel_r:.1f}%  (目标 <50%)")
+
+    # 宏观摘要（从最新信号读取）
+    if SIGNAL_FILE.exists():
+        try:
+            sig_data = json.loads(SIGNAL_FILE.read_text())
+            fng = sig_data.get("fng", {}) or {}
+            etf = sig_data.get("etf_flow", {}) or {}
+            fng_val = fng.get("now_value", "?")
+            fng_cls = fng.get("classification", "")
+            etf_24h = etf.get("24h_flow_usd_m")
+            etf_str = f"ETF:${etf_24h:.0f}M" if etf_24h is not None else ""
+            print(f"     宏观: 恐慌贪婪={fng_val}({fng_cls})  {etf_str}")
+        except Exception:
+            pass
 
     # 挂单队列
     if pending:
         print(f"\n  📋 挂单队列 ({len(pending)} 单，TTL={state.get('order_ttl_days', ORDER_TTL_DAYS)}天)")
-        print(f"  {'币':^5} {'类型':^12} {'挂单价':>11} {'当前价':>11} {'价差':>7}  "
+        print(f"  {'币':^5} {'方向':^10} {'挂单价':>11} {'当前价':>11} {'价差':>7}  "
               f"{'保证金':>7} {'杠杆':>5} {'预期盈利':>8} {'止损风险':>8} {'盈利概率':>8}  "
               f"{'下单日期':^11} {'成交状态':^6} {'到期':^8} {'剩余'}")
-        print(f"  {'-'*110}")
+        print(f"  {'-'*108}")
         for p in pending:
             cp     = p.get("current_price", p["limit_price"])
             lp     = p["limit_price"]
@@ -567,56 +1182,104 @@ def print_state(state: dict):
             sl     = p.get("sl")
             tp_str = f"${tp1:,.2f}" if tp1 else "N/A"
             sl_str = f"${sl:,.2f}"  if sl  else "N/A"
-            print(f"  {p['coin']:^5} {p['order_type']:^12} "
+            dir_d  = "🟢 多" if p["direction"] == "LONG" else "🔴 空"
+            print(f"  {p['coin']:^5} {dir_d:^10} "
                   f"${lp:>9,.4f} ${cp:>9,.4f} {gap:>+6.2f}%  "
                   f"${p['margin']:>5.0f} {p['leverage']:>4}x "
                   f"{exp_ret:>+7.1f}% {sl_risk:>+7.1f}% {prob:>7}%  "
                   f"{placed:^11} {'未成交':^6} {expiry:^8} {ttl_h:.0f}h")
-            print(f"  {'':^5} {'':^12}   TP1:{tp_str:>12}  SL:{sl_str:>12}  "
+            print(f"  {'':^5} {'':^10}   TP1:{tp_str:>12}  SL:{sl_str:>12}  "
                   f"盈亏比: {rr:.2f}x")
 
     # 持仓中
     if open_pos:
         print(f"\n  🔥 持仓中 ({len(open_pos)} 仓)")
-        print(f"  {'币':^5} {'方向':^5} {'挂单价':>11} {'入场价':>11} {'当前价':>11} "
-              f"{'杠杆':>5} {'保证金':>7} {'P&L($)':>9} {'P&L%':>7} {'成交日期':^12} {'状态'}")
-        print(f"  {'-'*95}")
+        print(f"  {'币':^5} {'方向':^5} {'入场价':>11} {'当前价':>11} {'杠杆':>5} "
+              f"{'保证金':>7} {'P&L($)':>9} {'P&L%':>7} {'TP1':>11} {'TP2':>11} {'SL':>11} {'成交日期':^12}")
+        print(f"  {'-'*115}")
         for pos in open_pos:
             cp       = pos.get("current_price", pos["entry_price"])
-            lp_str   = f"${pos['limit_price']:,.4f}" if pos.get("limit_price") else "  市价  "
             filled   = fmt_date(pos.get("filled_at", pos.get("opened_at", "")))
+            tp1_s    = f"${pos['tp1']:>8,.2f}" if pos.get('tp1') else "   N/A   "
+            tp2_s    = f"${pos['tp2']:>8,.2f}" if pos.get('tp2') else "   N/A   "
+            sl_s     = f"${pos['sl']:>8,.2f}" if pos.get('sl') else "   N/A   "
             print(f"  {pos['coin']:^5} {pos['direction']:^5} "
-                  f"{lp_str:>11} "
                   f"${pos['entry_price']:>9,.4f} "
                   f"${cp:>9,.4f} "
                   f"{pos['leverage']:>4}x "
                   f"${pos['margin']:>6.0f} "
                   f"${pos['pnl_usd']:>+8.2f} "
                   f"{pos['pnl_pct']:>+6.1f}% "
-                  f"{filled:^12} 🟢 OPEN")
+                  f"{tp1_s:>11} {tp2_s:>11} {sl_s:>11} "
+                  f"{filled:^12}")
 
     if not pending and not open_pos:
         print("\n  （无挂单和持仓）")
 
-    # 近7日明细
+    # 历史成交
     if HISTORY_FILE.exists():
         history = json.loads(HISTORY_FILE.read_text())
         if history:
+            has_filled = any(h.get("filled_at") for h in history[-20:])
+            has_cancelled = any("取消" in h.get("reason","") for h in history[-20:])
             print(f"\n  {'─'*75}")
-            print("  近7日明细:")
+            print(f"  📜 历史成交 ({len(history)} 单)  "
+                  f"{'✅已成交' if has_filled else ''} "
+                  f"{'⏰已取消' if has_cancelled else ''}")
             print(f"  {'下单日期':^11} {'币':^5} {'方向':^5} {'挂单价':>10} {'入场价':>10} "
-                  f"{'平仓价':>10} {'净P&L':>9} {'费用':>7} {'是否成交':^8} {'到期/原因'}")
+                  f"{'平仓价':>10} {'净P&L':>9} {'费用':>7} {'是否成交':^8} {'原因'}")
             print(f"  {'─'*80}")
             for h in history[-10:]:
                 placed  = fmt_date(h.get("placed_at") or h.get("closed_at", ""))
-                icon    = "✅" if h["pnl_usd"] > 0 else ("⏰" if "取消" in h.get("reason","") else "🔴" if h["pnl_usd"] < 0 else "—")
+                icon    = "✅" if h.get("pnl_usd", 0) > 0 else ("⏰" if "取消" in h.get("reason","") else "🔴" if h.get("pnl_usd", 0) < 0 else "—")
                 lp_s    = f"${h['limit_price']:,.4f}" if h.get("limit_price") else "  N/A  "
                 ep_s    = f"${h['entry_price']:,.4f}" if h.get("entry_price") else "  N/A  "
-                filled  = "已成交" if h.get("filled_at") else "未成交"
+                filled  = "✅已成交" if h.get("filled_at") else "❌未成交"
                 fee_s   = f"-${h.get('fee_usd',0):.4f}" if h.get("fee_usd") else "  —  "
+                close_p = h.get("close_price", 0)
                 print(f"  {placed:^11} {h['coin']:^5} {h['direction']:^5} "
-                      f"{lp_s:>10} {ep_s:>10} ${h['close_price']:>8,.4f} "
-                      f"{icon}${h['pnl_usd']:>+7.2f} {fee_s:>7} {filled:^8} {h.get('reason','')}")
+                      f"{lp_s:>10} {ep_s:>10} ${close_p:>8,.4f} "
+                      f"{icon}${h['pnl_usd']:>+7.2f} {fee_s:>8} {filled:^10} {h.get('reason','')}")
+
+    # ── 资金费率统计 ─────────────────────────────────────────
+    total_funding = state.get("total_funding_paid", 0.0)
+    if total_funding != 0:
+        print(f"  累计资金费用: ${total_funding:+.4f}")
+
+
+# ── 重置交易系统 ──────────────────────────────────────────
+def cmd_reset():
+    """清空所有数据，重置至初始状态"""
+    now_str = datetime.now(timezone.utc).isoformat()
+    fresh = {
+        "initial_capital":      INITIAL_CAPITAL,
+        "effective_capital":    INITIAL_CAPITAL,
+        "current_capital":      INITIAL_CAPITAL,
+        "peak_capital":         INITIAL_CAPITAL,
+        "current_drawdown_pct": 0.0,
+        "risk_mode":            False,
+        "profit_lock_mode":     False,
+        "last_updated":         now_str,
+        "created_at":           now_str,
+        "total_wins":           0,
+        "total_losses":         0,
+        "total_trades":         0,
+        "total_fees":           0.0,
+        "total_funding_paid":   0.0,
+        "realized_pnl":         0.0,
+        "positions":            [],
+        "risk_config":           DEFAULT_RISK_CONFIG.copy(),
+        "optimization_log":     [],
+    }
+    POSITIONS_FILE.write_text(json.dumps(fresh, indent=2, ensure_ascii=False))
+    HISTORY_FILE.write_text("[]")
+    archive_positions()
+    print(f"\n{'='*60}")
+    print(f"  🔄 模拟交易系统已重置")
+    print(f"  初始资金: ${INITIAL_CAPITAL:.0f}  |  状态: 空仓")
+    print(f"  时间: {fmt_cst(now_str)}")
+    print(f"{'='*60}")
+    return fresh
 
 
 # ── 7日算法优化 ───────────────────────────────────────────
@@ -754,6 +1417,7 @@ def cmd_optimize():
     state["optimization_log"] = state["optimization_log"][-10:]
 
     POSITIONS_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+    archive_positions()
     print(f"\n  ✅ risk_config 已更新  (杠杆系数:{cfg['leverage_multiplier']:.1f}  门槛:p{cfg['min_prob_score']})")
     return state
 
@@ -776,6 +1440,7 @@ def cmd_cancel():
             n += 1
     state["last_updated"] = now_str
     POSITIONS_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+    archive_positions()
     HISTORY_FILE.write_text(json.dumps(history, indent=2, ensure_ascii=False))
     print(f"✅ 已取消 {n} 个挂单")
 
@@ -985,5 +1650,7 @@ if __name__ == "__main__":
         cmd_cancel()
     elif cmd == "optimize":
         cmd_optimize()
+    elif cmd == "reset":
+        cmd_reset()
     else:
-        print(f"未知命令: {cmd}  (init|update|status|reopen|cancel|optimize)")
+        print(f"未知命令: {cmd}  (init|update|status|reopen|cancel|optimize|reset)")

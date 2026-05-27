@@ -20,27 +20,27 @@ venv/
 # === 项目运行时数据（不提交） ===
 crypto-signal/signal_history/
 crypto-signal/position_snapshots/
-crypto-signal/__pycache__/
-crypto-signal/.databus_cache.json
-crypto-signal/.dxy_cache.json
-crypto-signal/.macro_history.json
-crypto-signal/.market_overview_cache.json
-crypto-signal/.nasdaq_cache.json
-crypto-signal/.price_cache.json
-crypto-signal/.price_result_cache.json
-crypto-signal/.ws_prices.json
-crypto-signal/config.json
-crypto-signal/data_audit.log
-crypto-signal/grid_bot_price_archive.json
-crypto-signal/grid_bot_state.json
-crypto-signal/paper_positions.json
-crypto-signal/paper_trade_history.json
-crypto-signal/liquidation_bayesian_state.json
-crypto-signal/direction_history.json
-crypto-signal/signal_v2_latest.json
-crypto-signal/signal_v2_latest.md
-crypto-signal/bayesian_learning_log.json
-crypto-signal/openclue_latest_dims.json
+crypto_signal/__pycache__/
+crypto_signal/.databus_cache.json
+crypto_signal/.dxy_cache.json
+crypto_signal/.macro_history.json
+crypto_signal/.market_overview_cache.json
+crypto_signal/.nasdaq_cache.json
+crypto_signal/.price_cache.json
+crypto_signal/.price_result_cache.json
+crypto_signal/.ws_prices.json
+crypto_signal/config.json
+crypto_signal/data_audit.log
+crypto_signal/grid_bot_price_archive.json
+crypto_signal/grid_bot_state.json
+crypto_signal/paper_positions.json
+crypto_signal/paper_trade_history.json
+crypto_signal/liquidation_bayesian_state.json
+crypto_signal/direction_history.json
+crypto_signal/signal_v2_latest.json
+crypto_signal/signal_v2_latest.md
+crypto_signal/bayesian_learning_log.json
+crypto_signal/openclue_latest_dims.json
 
 # === 生成报告 ===
 reports/*.html
@@ -64,11 +64,8 @@ eden_trader/
 
 # === AI/IDE配置 ===
 .workbuddy/
-.codebuddy/
-.memory/
 
 # === 项目知识笔记（外部文档，不提交） ===
-memory/
 knowledge/cicc-research/
 
 # === Git保持追踪目录存在 ===

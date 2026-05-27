@@ -5,13 +5,24 @@
 """
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
-PRICES_FILE = "/Users/alex/hermes_claud/super_mario/crypto-signal/prices_latest.json"
-REPORT_FILE = "/Users/alex/hermes_claud/super_mario/reports/crypto_signal_20260511.html"
-OUTPUT_FILE = "/Users/alex/hermes_claud/super_mario/crypto-signal/audit_result.json"
+# ── 工作区根路径（自动检测）───────────────────────────────────
+# 优先使用环境变量，否则基于脚本位置推断
+_WORKSPACE = Path(os.environ.get(
+    "CRYPTO_ANALYST_WS",
+    "/Users/alex/projects/crypto_analyst"
+))
+CRYPTO_DIR = _WORKSPACE / "crypto-signal"
+REPORTS_DIR = _WORKSPACE / "reports"
+
+# 可配置输入（支持命令行参数覆盖）
+PRICES_FILE = CRYPTO_DIR / "prices_latest.json"
+REPORT_FILE = REPORTS_DIR / "crypto_signal_20260511.html"
+OUTPUT_FILE = CRYPTO_DIR / "audit_result.json"
 
 TOLERANCE_PCT = 5.0  # 允许偏差上限
 

@@ -244,5 +244,8 @@ def fetch_all_prices(output_path: str | None = None) -> dict:
 
 
 if __name__ == "__main__":
-    out = sys.argv[1] if len(sys.argv) > 1 else "/Users/alex/hermes_claud/super_mario/crypto-signal/prices_latest.json"
+    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
+        os.environ.get("CRYPTO_ANALYST_WS", "/Users/alex/projects/crypto_analyst"),
+        "crypto-signal", "prices_latest.json"
+    )
     fetch_all_prices(output_path=out)
