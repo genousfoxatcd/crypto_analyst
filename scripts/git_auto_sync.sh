@@ -93,8 +93,7 @@ echo "🔖 版本: $CURRENT_VERSION → $NEW_VERSION"
 # 生成 commit message
 COMMIT_MSG="chore(ops): 自动同步核心脚本更新 ${NEW_VERSION}"
 
-# Stash 非核心变更以避免干扰
-git add -A
+# Stash 非核心变更以避免干扰（只stash已追踪的修改，不add所有文件）
 git stash --include-untracked -m "non-core-auto-stash-$(date +%s)" 2>/dev/null
 
 # 只添加核心文件
