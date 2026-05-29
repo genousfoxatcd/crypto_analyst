@@ -124,26 +124,34 @@ def build_tech_table(data):
 
 def build_liq_table(data):
     signals = data.get("signals", {})
+    prices = data.get("prices", {})
     rows = ""
     for coin, sd in signals.items():
         liq = sd.get("liquidation", {}) or {}
+        price = prices.get(coin, {}).get("price", 0)
         ll5  = liq.get("liq_long_zones", {}).get("5x")
         ll10 = liq.get("liq_long_zones", {}).get("10x")
-        ls5  = liq.get("liq_short_zones", {}).get("5x")
+        ll20 = liq.get("liq_long_zones", {}).get("20x")
         ls10 = liq.get("liq_short_zones", {}).get("10x")
+        ls20 = liq.get("liq_short_zones", {}).get("20x")
         risk = liq.get("primary_risk", "NEUTRAL")
         risk_cell = (
             '<span class="badge badge-sl">多头爆仓风险</span>' if risk == "DOWN" else
             '<span class="badge badge-tp">空头爆仓风险</span>' if risk == "UP" else
             '<span style="color:#6b7280">中性</span>'
         )
+        def fmt_liq(val):
+            if val is None or price == 0: return '<span style="color:#6b7280">—</span>'
+            dist = abs(price - val) / price * 100
+            p_s = f"${val:,.2f}" if abs(val) >= 1 else f"${val:,.4f}"
+            return f'{p_s} <span style="font-size:11px;color:#9ca3af">({dist:.1f}%)</span>'
         rows += (
             f"<tr>"
             f"<td><b>{coin}</b></td>"
-            f"<td style='color:#4ade80'>{fmt_price(ll5, coin)}</td>"
-            f"<td style='color:#4ade80'>{fmt_price(ll10, coin)}</td>"
-            f"<td style='color:#f87171'>{fmt_price(ls5, coin)}</td>"
-            f"<td style='color:#f87171'>{fmt_price(ls10, coin)}</td>"
+            f"<td style='color:#4ade80'>{fmt_liq(ll10)}</td>"
+            f"<td style='color:#4ade80'>{fmt_liq(ll20)}</td>"
+            f"<td style='color:#f87171'>{fmt_liq(ls10)}</td>"
+            f"<td style='color:#f87171'>{fmt_liq(ls20)}</td>"
             f"<td>{risk_cell}</td>"
             f"</tr>\n"
         )
@@ -291,13 +299,14 @@ tr:hover td{{background:var(--card2)}}
 </section>
 
 <section id="liquidation">
-  <h2>⚡ 爆仓区间估算（插针风险）</h2>
+  <h2>⚡ 爆仓区间估算（10x / 20x 杠杆）</h2>
   <div class="table-wrap">
   <table>
-    <thead><tr><th>币种</th><th>多头5x爆</th><th>多头10x爆</th><th>空头5x爆</th><th>空头10x爆</th><th>主要风险方向</th></tr></thead>
+    <thead><tr><th>币种</th><th>多头10x爆(距%)</th><th>多头20x爆(距%)</th><th>空头10x爆(距%)</th><th>空头20x爆(距%)</th><th>主要风险方向</th></tr></thead>
     <tbody>{liq_rows}</tbody>
   </table>
   </div>
+  <p class="sub-note">差异化公式：ATR波动率缓冲 + 多空比拥挤调整 → 各币种清算距离不同 · 距%=价格距当前价百分比</p>
 </section>
 
 <section id="macro">

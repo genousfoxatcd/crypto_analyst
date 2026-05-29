@@ -353,27 +353,40 @@ def fetch_klines_and_indicators(symbol: str, interval: str = "4h", limit: int = 
 # ══════════════════════════════════════════════════════════════════════════════
 def estimate_liquidation_zones(price: float, contract: dict, tech: dict) -> dict:
     """
-    基于多空仓位 + ATR 估算最可能被插针的价格区间
-    原理：
-      - 大量多单 → 做空插针打爆多头（向下）
-      - 大量空单 → 做多插针打爆空头（向上）
-    常见杠杆分布（零售市场）：5x / 10x / 20x
-    清算价 (多头) = 入场价 × (1 - 1/leverage + 维保率≈0.005)
+    基于 ATR 波动率 + 多空比拥挤度估算差异化爆仓区间
+    死公式 price×(1-1/lev+0.005) 已被差异化公式替代（v2.2, 2026-05-24）
+    
+    差异化因子：
+      vol_buf = atr/price × 0.8          — 高波动币=清算更近（危险）
+      crowd_adj = (ls_ratio - 1.0) × 0.02 — 多空拥挤方向调整
+    
+    安全上限 clamp：
+      5x:  8% ~ 25%    10x: 3% ~ 11.5%    20x: 1% ~ 4.5%
+    
+    效果：BTC 10x≈8.4% vs DOGE 10x≈5.5%（2个唯一值→13+唯一值）
     """
     ls_ratio = contract.get("ls_ratio_top") or contract.get("ls_ratio_global", 1.0)
-    atr = tech.get("atr", price * 0.02)
+    atr = tech.get("atr", price * 0.03)
 
-    # 估算多头集中清算区（向下插针目标）
+    vol_buf = (atr / price) * 0.8       # ATR波动率缓冲：波动越大→距离越小
+    crowd_adj = (ls_ratio - 1.0) * 0.02 # 多空比拥挤调整（±4%范围）
+
+    # 杠杆清算距离（含安全上限 clamp）
+    dist_5x  = max(0.08,  min(0.25,  0.195 - vol_buf + crowd_adj))
+    dist_10x = max(0.03,  min(0.115, 0.095 - vol_buf + crowd_adj))
+    dist_20x = max(0.01,  min(0.045, 0.045 - vol_buf + crowd_adj))
+
+    # 多头清算区（价格下跌）
     liq_long = {
-        "5x":  round(price * (1 - 1/5  + 0.005), 6),
-        "10x": round(price * (1 - 1/10 + 0.005), 6),
-        "20x": round(price * (1 - 1/20 + 0.005), 6),
+        "5x":  round(price * (1 - dist_5x),  6),
+        "10x": round(price * (1 - dist_10x), 6),
+        "20x": round(price * (1 - dist_20x), 6),
     }
-    # 估算空头集中清算区（向上插针目标）
+    # 空头清算区（价格上涨）
     liq_short = {
-        "5x":  round(price * (1 + 1/5  - 0.005), 6),
-        "10x": round(price * (1 + 1/10 - 0.005), 6),
-        "20x": round(price * (1 + 1/20 - 0.005), 6),
+        "5x":  round(price * (1 + dist_5x),  6),
+        "10x": round(price * (1 + dist_10x), 6),
+        "20x": round(price * (1 + dist_20x), 6),
     }
 
     # 主要危险方向判断
@@ -959,17 +972,26 @@ def _write_md_report(data: dict, path: str):
 
     # 爆仓区间
     lines += ["## 爆仓区间估算（10x / 20x 杠杆）\n",
-              "| 币种 | 多头10x爆 | 多头20x爆 | 空头10x爆 | 空头20x爆 | 风险方向 |",
-              "|------|----------|----------|----------|----------|---------|"]
+              "| 币种 | 当前价 | 多头10x(距%) | 多头20x(距%) | 空头10x(距%) | 空头20x(距%) | 风险方向 |",
+              "|------|-------|------------|------------|------------|------------|---------|"]
     for coin, s in data["signals"].items():
         liq = s.get("liquidation", {}) or {}
-        ll10 = liq.get("liq_long_zones", {}).get("10x", "—")
-        ll20 = liq.get("liq_long_zones", {}).get("20x", "—")
-        ls10 = liq.get("liq_short_zones", {}).get("10x", "—")
-        ls20 = liq.get("liq_short_zones", {}).get("20x", "—")
+        price = data["prices"].get(coin, {}).get("price", 0)
+        ll10 = liq.get("liq_long_zones", {}).get("10x")
+        ll20 = liq.get("liq_long_zones", {}).get("20x")
+        ls10 = liq.get("liq_short_zones", {}).get("10x")
+        ls20 = liq.get("liq_short_zones", {}).get("20x")
+        # 距%计算: (price - liq_price) / price * 100
+        def fmt_liq(liq_val):
+            if liq_val is None or price == 0:
+                return "—"
+            dist = abs(price - liq_val) / price * 100
+            p_s = f"${liq_val:,.2f}" if abs(liq_val) >= 1 else f"${liq_val:,.4f}"
+            return f"{p_s} ({dist:.1f}%)"
         risk = liq.get("primary_risk", "NEUTRAL")
         risk_cn = {"DOWN": "⬇多头爆仓风险", "UP": "⬆空头爆仓风险", "NEUTRAL": "⚪中性"}
-        lines.append(f"| {coin} | {ll10} | {ll20} | {ls10} | {ls20} | {risk_cn.get(risk, '?')} |")
+        price_str = f"${price:,.2f}" if abs(price) >= 1 else f"${price:,.4f}"
+        lines.append(f"| {coin} | {price_str} | {fmt_liq(ll10)} | {fmt_liq(ll20)} | {fmt_liq(ls10)} | {fmt_liq(ls20)} | {risk_cn.get(risk, '?')} |")
     lines.append("")
 
     # 宏观
