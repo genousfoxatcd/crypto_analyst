@@ -628,7 +628,7 @@ def _fmt_large(v):
 
 # 板块划分
 MAINSTREAM_COINS = ["BTC", "ETH", "SOL", "BNB"]
-ALTCOIN_COINS = ["DOGE", "TAO", "ZEC", "CAKE", "HYPE", "PAXG"]
+ALTCOIN_COINS = ["DOGE", "TAO", "ZEC", "CAKE", "HYPE", "PAXG", "TRX", "AAVE"]
 
 def _classify_coin_trend(change_24h, flow_buy_pct, funding_rate, long_pct, taker_bsr, prob_score):
     """

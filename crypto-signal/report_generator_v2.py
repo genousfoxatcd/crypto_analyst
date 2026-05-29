@@ -29,6 +29,14 @@ except ImportError:
     HAS_DEFILAMA = False
     print("  [DeFiLlama] 模块未找到，跳过 DeFi TVL 展示")
 
+# 尝试导入代币解锁追踪模块
+try:
+    from token_unlock_tracker import get_unlock_summary_html
+    HAS_UNLOCK_TRACKER = True
+except ImportError:
+    HAS_UNLOCK_TRACKER = False
+    print("  [TokenUnlock] 模块未找到，跳过解锁数据展示")
+
 CRYPTO_WS = Path(os.environ.get("CRYPTO_ANALYST_WS", "/Users/alex/projects/crypto_analyst"))
 BASE         = CRYPTO_WS / "crypto-signal"
 SIGNAL_FILE  = BASE / "signal_v2_latest.json"
@@ -84,7 +92,11 @@ def build_openclue_section() -> str:
     # ── 2. 币种趋势判断表 ──────────────────────────────
     coin_rows = ""
     dir_label = {"LONG": "🟢做多", "SHORT": "🔴做空", "NEUTRAL": "⚪观望"}
-    for coin in ["BTC","ETH","BNB","SOL","DOGE","TAO","ZEC","CAKE","PAXG"]:
+    stances = dims.get("stances", {}) if dims else {}
+    macro = dims.get("macro", {}) if dims else {}
+    # 用 volume_sorted_coins 获取币种排序
+    sc = _volume_sorted_coins(data)
+    for coin in sc:
         s = stances.get(coin, {})
         if not s:
             continue
@@ -177,38 +189,32 @@ def change_span(v):
     if v is None: return "<span>—</span>"
     color = "#4ade80" if v >= 0 else "#f87171"
     sign  = "+" if v >= 0 else ""
+
+
+def _volume_sorted_coins(data):
+    """按 24h 交易量降序排列所有币种"""
+    prices = data.get("prices", {})
+    signals = data.get("signals", {})
+    # 只保留 signals 中存在的币种（有信号的）
+    coin_vols = {}
+    for coin in signals:
+        pd = prices.get(coin, {})
+        vol = pd.get("volume_24h", 0) or 0
+        coin_vols[coin] = vol
+    # 降序排列
+    return [c for c, _ in sorted(coin_vols.items(), key=lambda x: x[1], reverse=True)]
     return f'<span style="color:{color}">{sign}{v:.2f}%</span>'
 
 
 # ── Table builders ──────────────────────────────────────────
 
-def build_price_table(data):
-    prices = data.get("prices", {})
-    rows = ""
-    for coin, pd in prices.items():
-        chg_span = change_span(pd.get("change_24h"))
-        vol      = pd.get("volume_str", "—")
-        vcp = pd.get("volume_change_pct")
-        vcp_html = ""
-        if vcp is not None:
-            color = "#4ade80" if vcp >= 0 else "#f87171"
-            arrow = "▲" if vcp >= 0 else "▼"
-            vcp_html = f'<span style="color:{color};font-size:0.75rem">{arrow}{abs(vcp):.1f}%</span>'
-        rows += (
-            f"<tr>"
-            f"<td><b>{coin}</b></td>"
-            f"<td>{fmt_price(pd.get('price'), coin)}</td>"
-            f"<td>{chg_span}</td>"
-            f"<td>{vol}<br>{vcp_html}</td>"
-            f"</tr>\n"
-        )
-    return rows
-
-
-def build_contract_table(data):
+def build_contract_table(data, coin_order=None):
     signals = data.get("signals", {})
     rows = ""
-    for coin, sd in signals.items():
+    for coin in (coin_order or [c for c in signals]):
+        sd = signals.get(coin)
+        if not sd:
+            continue
         fr  = sd.get("funding_rate", 0) or 0
         liq = sd.get("liquidation", {}) or {}
         ls  = liq.get("ls_ratio", 1) or 1
@@ -266,12 +272,15 @@ def build_tech_table(data):
     return rows
 
 
-def build_liq_table(data):
+def build_liq_table(data, coin_order=None):
     """爆仓区间：10x + 20x 杠杆 + 爆多仓/爆空仓概率 + 定向插针点位"""
     signals = data.get("signals", {})
     prices  = data.get("prices", {})
     rows = ""
-    for coin, sd in signals.items():
+    for coin in (coin_order or [c for c in signals]):
+        sd = signals.get(coin)
+        if not sd:
+            continue
         liq = sd.get("liquidation", {}) or {}
         ll10 = liq.get("liq_long_zones", {}).get("10x")
         ll20 = liq.get("liq_long_zones", {}).get("20x")
@@ -298,17 +307,19 @@ def build_liq_table(data):
         
         def fmt_prob_color(p, is_high=False):
             if p >= 60:
-                # 高风险 → 加粗蓝色高亮显示
-                return "#3b82f6;font-weight:700"
-            elif p >= 30:
-                return "#f59e0b;font-weight:600"  # 中风险 黄色
+                # 高风险（≥60%）→ 红色加粗，真正需要关注
+                return "#ef4444;font-weight:700"
+            elif p >= 45:
+                # 中风险（45-60%）→ 橙色，值得留意
+                return "#f59e0b;font-weight:600"
             else:
-                return "#4ade80"                   # 低风险 绿色
+                # 低风险（<45%）→ 默认绿色，无需额外关注
+                return "#4ade80"
         
         def fmt_prob_cell(p):
             if p >= 60:
-                return f'<span style="color:#3b82f6;font-weight:700">{p:.0f}%</span>'
-            elif p >= 30:
+                return f'<span style="color:#ef4444;font-weight:700">{p:.0f}%</span>'
+            elif p >= 45:
                 return f'<span style="color:#f59e0b;font-weight:600">{p:.0f}%</span>'
             else:
                 return f'<span style="color:#4ade80">{p:.0f}%</span>'
@@ -418,7 +429,7 @@ def build_eth_etf_row(data):
     return '<tr><td><b>ETH ETF流量</b></td><td style="color:var(--muted)">数据不可用</td><td>—</td><td>—</td><td>—</td></tr>'
 
 
-def build_signal_table(data):
+def build_signal_table(data, coin_order=None):
     signals = data.get("signals", {})
     prices = data.get("prices", {})
     tech   = data.get("tech_data", {})
@@ -426,7 +437,10 @@ def build_signal_table(data):
     DIR_LABEL = {"LONG": "🟢 做多", "SHORT": "🔴 做空", "NEUTRAL": "⚪ 观望"}
     DIR_CLASS = {"LONG": "long-dir", "SHORT": "short-dir", "NEUTRAL": ""}
     rows = ""
-    for coin, sd in signals.items():
+    for coin in (coin_order or [c for c in signals]):
+        sd = signals.get(coin)
+        if not sd:
+            continue
         direction = sd.get("direction", "NEUTRAL")
         entry = sd.get("entry_zone", [None, None])
         entry_ready = sd.get("entry_ready", "unknown") or [None, None]
@@ -659,14 +673,20 @@ def _build_macro_summary(data: dict) -> str:
     except Exception:
         pass
 
-    # ── 各币种趋势表 ─────────────────────────────────────
+    # ── 各币种趋势表（已合并实时价格数据）──
     trend_rows = ""
+    prices = data.get("prices", {})
     # 动态获取所有币种（排除内部键 _segment）
     all_coins = [c for c in coin_trends if c != "_segment"]
     for coin in all_coins:
         t = coin_trends.get(coin, {})
         if not t:
             continue
+        
+        # 价格数据（来自 prices）
+        pd = prices.get(coin, {})
+        price_str = fmt_price(pd.get('price'), coin) if pd.get('price') else '—'
+        
         change = t.get("change_24h")
         chg_str = f'{change:+.2f}%' if change is not None else '—'
         chg_clr = '#4ade80' if change is not None and change >= 0 else '#f87171'
@@ -683,16 +703,26 @@ def _build_macro_summary(data: dict) -> str:
         long_clr = '#f87171' if long_pct > 60 else '#4ade80' if long_pct < 42 else '#e5e7eb'
 
         trend_label = t.get("trend_label", "⚪ 中性/震荡")
+        
+        # 量环比（来自 prices）
+        vcp = pd.get("volume_change_pct")
+        vcp_html = ''
+        if vcp is not None:
+            vcp_clr = '#4ade80' if vcp >= 0 else '#f87171'
+            vcp_arrow = '▲' if vcp >= 0 else '▼'
+            vcp_html = f'<span style="color:{vcp_clr}">{vcp_arrow}{abs(vcp):.1f}%</span>'
 
         trend_rows += f"""
     <tr>
         <td><b>{coin}</b></td>
+        <td style="color:#e5e7eb">{price_str}</td>
         <td style="color:{chg_clr}">{chg_str}</td>
         <td>{trend_label}</td>
         <td style="color:{fr_clr}">{fr_str}</td>
         <td style="color:{flow_clr}">{flow_str}</td>
         <td style="color:{long_clr}">{long_pct:.0f}%</td>
         <td>{t.get('volume','—')}</td>
+        <td>{vcp_html}</td>
     </tr>"""
 
     # ── 板块轮动分析 ─────────────────────────────────────
@@ -794,7 +824,7 @@ def _build_macro_summary(data: dict) -> str:
   <!-- 各币种趋势表 -->
   <h3 style="color:var(--accent);margin:18px 0 10px;font-size:0.95rem">📈 全量币种趋势（多因子综合判断）</h3>
   <div class="table-wrap"><table>
-    <thead><tr><th>币种</th><th>24h涨跌</th><th>趋势方向</th><th>资金费率</th><th>买方流量</th><th>多头占比</th><th>24h量</th></tr></thead>
+    <thead><tr><th>币种</th><th>均价</th><th>24h涨跌</th><th>趋势方向</th><th>资金费率</th><th>买方流量</th><th>多头占比</th><th>24h量</th><th>量环比</th></tr></thead>
     <tbody>{trend_rows}</tbody>
   </table></div>
   <p class="sub-note">趋势方向基于多因子综合得分（价格+资金流+费率+多头拥挤度+Taker BSR），绿色=看涨，红色=看跌，灰色=中性</p>
@@ -1048,11 +1078,15 @@ def generate_html(signal_file: Path, paper_file: Path, output_path: Path, auto_o
     else:
         freshness_html = f'<div style="color:var(--muted);font-size:0.75rem;margin-top:4px">{freshness_msg}</div>'
 
-    price_rows        = build_price_table(data)
-    contract_rows     = build_contract_table(data)
-    liq_rows          = build_liq_table(data)
+    # 按 24h 交易量排序币种
+    sorted_coins = _volume_sorted_coins(data)
+    if sorted_coins:
+        print(f"  [ReportGen] 报告按24h量排列: {' > '.join(sorted_coins)}")
+    
+    contract_rows     = build_contract_table(data, sorted_coins)
+    liq_rows          = build_liq_table(data, sorted_coins)
     whale_rows        = build_whale_table(data)
-    sig_rows          = build_signal_table(data)
+    sig_rows          = build_signal_table(data, sorted_coins)
     # 生成报告前先更新模拟交易状态（获取最新价格和SL/TP触发）
     if paper_file.exists():
         try:
@@ -1079,6 +1113,14 @@ def generate_html(signal_file: Path, paper_file: Path, output_path: Path, auto_o
 
     etf_row = build_etf_row(data)
     eth_etf_row = build_eth_etf_row(data)
+
+    # 代币解锁数据
+    unlock_html = ""
+    if HAS_UNLOCK_TRACKER:
+        try:
+            unlock_html = get_unlock_summary_html()
+        except Exception as e:
+            print(f"  [TokenUnlock] 生成失败: {e}")
 
     # 鲸鱼表格（可选）
     whale_section = ""
@@ -1116,16 +1158,6 @@ def generate_html(signal_file: Path, paper_file: Path, output_path: Path, auto_o
 
 {macro_summary_html}
 
-<section id="prices">
-  <h2>💰 实时价格（加权均价）</h2>
-  <div class="table-wrap">
-  <table>
-    <thead><tr><th>币种</th><th>均价</th><th>24h涨跌</th><th>24h交易量(环比)</th></tr></thead>
-    <tbody>{price_rows}</tbody>
-  </table>
-  </div>
-</section>
-
 <section id="contracts">
   <h2>📈 Futures 合约数据</h2>
   <div class="table-wrap">
@@ -1134,7 +1166,7 @@ def generate_html(signal_file: Path, paper_file: Path, output_path: Path, auto_o
     <tbody>{contract_rows}</tbody>
   </table>
   </div>
-  <p class="sub-note">爆仓概率 = 基于多空拥挤度+资金费率+BB位置的贝叶斯加权模型 · 插针点位 = price ± ATR×2.5 · 概率持续用历史数据修正 · 绿<30% 黄30-60% 红>60%</p>
+  <p class="sub-note">爆仓概率 = 距离+拥挤度+资金费率+BB位置 四因子模型 · 距离越近权重越高 · 绿&lt;45% 黄45-60% 红≥60%</p>
 </section>
 
 <section id="liquidation">
@@ -1148,6 +1180,7 @@ def generate_html(signal_file: Path, paper_file: Path, output_path: Path, auto_o
 </section>
 
 {whale_section}
+{unlock_html}
 
 <section id="macro">
   <h2>🌐 宏观数据</h2>
@@ -1305,6 +1338,20 @@ def generate_html(signal_file: Path, paper_file: Path, output_path: Path, auto_o
 
     output_path.write_text(html, encoding="utf-8")
     print(f"✅ HTML: {output_path}")
+    
+    # 自动触发审核（仅限信号报告）
+    try:
+        import subprocess as _sp
+        verifier = str(BASE / "report_verifier.py")
+        result = _sp.run([sys.executable, verifier, str(output_path)], 
+                        capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            print(f"  ✅ 报告审核通过: {output_path.name}")
+        else:
+            print(f"  ⚠️ 报告审核发现问题，请手动检查:")
+            print(f"    {result.stdout.split(chr(10))[0] if result.stdout else '未知错误'}")
+    except Exception as _e:
+        pass  # 审核失败不影响报告生成
     
     # 自动在外部浏览器中打开报告
     if auto_open:

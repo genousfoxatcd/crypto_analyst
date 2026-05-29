@@ -26,6 +26,8 @@ COINS = {
     "SOL":  {"binance": "SOLUSDT",  "coingecko": "solana",       "cmc_id": 5426},
     "DOGE": {"binance": "DOGEUSDT", "coingecko": "dogecoin",     "cmc_id": 74},
     "TAO":  {"binance": "TAOUSDT",  "coingecko": "bittensor",    "cmc_id": 22974},
+    "TRX":  {"binance": "TRXUSDT",  "coingecko": "tron",         "cmc_id": 1958},
+    "AAVE": {"binance": "AAVEUSDT", "coingecko": "aave",         "cmc_id": 7278},
 }
 
 TIMEOUT = 8  # seconds per request

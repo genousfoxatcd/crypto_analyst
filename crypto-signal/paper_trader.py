@@ -109,11 +109,12 @@ INITIAL_CAPITAL   = 1000.0
 BINANCE_MAKER_FEE = 0.0002   # 限价单 maker 手续费 0.02%
 BINANCE_TAKER_FEE = 0.0004   # 市价单 taker 手续费 0.04%（SL/TP触发时按taker费率）
 FUNDING_INTERVAL_H = 8       # 币安U本位合约资金费率结算间隔（每8小时）
-COINS = ["BTC", "ETH", "BNB", "SOL", "DOGE", "TAO", "ZEC", "CAKE", "PAXG", "HYPE"]
+COINS = ["BTC", "ETH", "BNB", "SOL", "DOGE", "TAO", "ZEC", "CAKE", "PAXG", "HYPE", "TRX", "AAVE"]
 BINANCE_SYMBOLS = {
     "BTC": "BTCUSDT", "ETH": "ETHUSDT", "BNB": "BNBUSDT",
     "SOL": "SOLUSDT", "DOGE": "DOGEUSDT", "TAO": "TAOUSDT",
     "ZEC": "ZECUSDT", "CAKE": "CAKEUSDT", "PAXG": "PAXGUSDT",
+    "HYPE": "HYPEUSDT", "TRX": "TRXUSDT", "AAVE": "AAVEUSDT",
 }
 
 
@@ -189,12 +190,13 @@ def get_current_prices() -> dict:
         print("  ⚠️ Binance不可用，降级至备用交易所...")
         try:
             resp = requests.get(
-                "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,binancecoin,solana,dogecoin,bittensor,zcash,pancakeswap-token&vs_currencies=usd",
+                "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,binancecoin,solana,dogecoin,bittensor,zcash,pancakeswap-token,pax-gold,hyperliquid,tron&vs_currencies=usd",
                 timeout=10)
             if resp.status_code == 200:
                 cg = resp.json()
                 M = {"bitcoin":"BTC","ethereum":"ETH","binancecoin":"BNB","solana":"SOL",
-                     "dogecoin":"DOGE","bittensor":"TAO","zcash":"ZEC","pancakeswap-token":"CAKE"}
+                     "dogecoin":"DOGE","bittensor":"TAO","zcash":"ZEC","pancakeswap-token":"CAKE",
+                     "pax-gold":"PAXG","hyperliquid":"HYPE","tron":"TRX","aave":"AAVE"}
                 for cg_id, coin in M.items():
                     if cg_id in cg and "usd" in cg[cg_id]:
                         prices[coin] = cg[cg_id]["usd"]

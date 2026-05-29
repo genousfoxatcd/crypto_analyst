@@ -727,7 +727,7 @@ def _build_coin_deep_dive(data: dict, dims: dict) -> str:
     coin_trends = data["macro"].get("assessment", {}).get("coin_trends", {}) or {}
 
     parts = []
-    for coin in ["BTC", "ETH", "SOL", "BNB", "DOGE", "TAO", "ZEC", "CAKE"]:
+    for coin in ["BTC", "ETH", "SOL", "BNB", "DOGE", "TAO", "ZEC", "CAKE", "PAXG", "HYPE", "TRX", "AAVE"]:
         p = prices.get(coin, {})
         s = signals.get(coin, {})
         t = coin_trends.get(coin, {})
@@ -798,7 +798,7 @@ def generate_html_report(data: dict, dims: dict) -> str:
 
     # 各币种信号行
     signal_rows = ""
-    for coin in ["BTC", "ETH", "SOL", "BNB", "DOGE", "TAO", "ZEC", "CAKE"]:
+    for coin in ["BTC", "ETH", "SOL", "BNB", "DOGE", "TAO", "ZEC", "CAKE", "PAXG", "HYPE", "TRX", "AAVE"]:
         s = signals.get(coin, {})
         if not s:
             continue

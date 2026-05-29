@@ -15,8 +15,8 @@ echo "🤖 网格机器人周度分析 [$(date '+%Y-%m-%d %H:%M')]"
 
 # Step 1: 先做每日更新（确保数据最新）
 echo "  [1/3] 每日更新..."
-$PYTHON grid_bot_sim.py --cmd archive 2>&1 | tail -1
-$PYTHON grid_bot_sim.py --cmd update 2>&1 | tail -1
+$PYTHON grid_bot_sim.py archive 2>&1 | tail -1
+$PYTHON grid_bot_sim.py update 2>&1 | tail -1
 
 # Step 2: 周度分析
 echo "  [2/3] 周度分析..."

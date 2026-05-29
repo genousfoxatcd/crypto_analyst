@@ -81,6 +81,10 @@ COINS = {
              "gate": "PAXG_USDT", "kraken": "PAXGUSD",  "cg": "pax-gold"},
     "HYPE": {"binance": "HYPEUSDT","okx": "HYPE-USDT", "bybit": "HYPEUSDT",
              "gate": "HYPE_USDT", "kraken": None,      "cg": "hyperliquid"},
+    "TRX":  {"binance": "TRXUSDT", "okx": "TRX-USDT",  "bybit": "TRXUSDT",
+             "gate": "TRX_USDT",  "kraken": "TRXUSD",  "cg": "tron"},
+    "AAVE": {"binance": "AAVEUSDT","okx": "AAVE-USDT","bybit": "AAVEUSDT",
+             "gate": "AAVE_USDT","kraken": "AAVEUSD", "cg": "aave"},
 }
 
 EXCHANGE_WEIGHTS = {"Binance": 3, "OKX": 2, "Bybit": 2, "Gate.io": 1, "Kraken": 1, "CoinGecko": 1}
@@ -609,28 +613,43 @@ def estimate_liquidation_zones(price: float, contract: dict, tech: dict) -> dict
     taker_dir = "买方主导" if taker_bsr > 1.1 else ("卖方主导" if taker_bsr < 0.9 else "均衡")
     
     # ═══ 爆多仓概率（多头拥挤 → 向下插针风险）═══
-    # 因子: 多头占比拥挤度(50%) + 资金费率惩罚(30%) + BB低位风险(20%)
+    # 因子: 爆仓距离(50%) + 多头占比拥挤度(20%) + 资金费率惩罚(15%) + BB低位风险(15%)
     import math
     funding_rate = contract.get("funding_rate", 0) or 0
     bb_pos = tech.get("price_vs_bb_pct", 50)
+    
+    # 爆仓距离风险：距离清算位越近，概率越高（核心因子）
+    liq_long_20x = liq_long.get("20x", 0)
+    liq_short_20x = liq_short.get("20x", 0)
+    dist_to_long_liq_pct = ((price - liq_long_20x) / price * 100) if (liq_long_20x and price > 0) else 999
+    dist_to_short_liq_pct = ((liq_short_20x - price) / price * 100) if (liq_short_20x and price > 0) else 999
+    # 距离越近 → 风险越高（线性衰减到5%后归零）
+    liq_dist_risk_long = max(0, 1 - dist_to_long_liq_pct / 5.0)   # 爆多仓风险
+    liq_dist_risk_short = max(0, 1 - dist_to_short_liq_pct / 5.0) # 爆空仓风险
     
     # 多头拥挤度归一化：long_pct偏离50%越多，风险越高
     crowd_score_long = max(0, (long_pct - 0.5) * 2)   # 范围 0~1（多头侧）
     funding_penalty = min(1.0, abs(funding_rate) * 1000)
     bb_risk_long = max(0, 1 - bb_pos / 100)            # BB低位=下方风险高
     
-    x_long = crowd_score_long * 1.5 + funding_penalty * 0.8 + bb_risk_long * 0.6
+    x_long = (liq_dist_risk_long * 3.0 +        # 距离因子（最高权重）
+              crowd_score_long * 1.2 +
+              funding_penalty * 0.6 +
+              bb_risk_long * 0.5)
     long_liq_prob = 1 / (1 + math.exp(-x_long + 1.2))  # sigmoid
     
     # ═══ 爆空仓概率（空头集中 → 向上插针风险）═══
-    # 因子: 空头占比拥挤度(50%) + 吃单比风险(30%) + BB高位风险(20%)
+    # 因子: 爆仓距离(50%) + 空头占比拥挤度(20%) + 吃单比风险(15%) + BB高位风险(15%)
     short_pct = 1 - long_pct
     crowd_score_short = max(0, (short_pct - 0.5) * 2)  # 范围 0~1（空头侧）
     taker_bsr = contract.get("taker_buy_sell_ratio", 1.0)
     taker_risk = max(0, taker_bsr - 1.0) if taker_bsr else 0  # 买方强势=空头风险
     bb_risk_short = max(0, bb_pos / 100 - 0.5)               # BB高位=上方风险高
     
-    x_short = crowd_score_short * 1.5 + taker_risk * 0.5 + bb_risk_short * 0.6
+    x_short = (liq_dist_risk_short * 3.0 +       # 距离因子（最高权重）
+               crowd_score_short * 1.2 +
+               taker_risk * 0.5 +
+               bb_risk_short * 0.5)
     short_liq_prob = 1 / (1 + math.exp(-x_short + 1.2))  # sigmoid
     
     # 保留综合概率（取两者较大值，向后兼容）
@@ -1572,7 +1591,7 @@ def _write_md_report(data: dict, path: str):
             lines += ["", "### 📈 各币种趋势（多因子综合判断）"]
             lines += ["| 币种 | 24h涨跌 | 趋势方向 | 资金费率 | 买方流量 | 多头占比 | 24h量 |",
                       "|------|---------|----------|---------|---------|---------|-------|"]
-            for coin in ["BTC", "ETH", "SOL", "BNB", "DOGE", "TAO", "ZEC", "CAKE"]:
+            for coin in ["BTC", "ETH", "SOL", "BNB", "DOGE", "TAO", "ZEC", "CAKE", "TRX", "AAVE"]:
                 t = coin_trends.get(coin, {})
                 if not t:
                     continue

@@ -52,6 +52,7 @@ BINANCE_COINS = {
     "BTC": "BTCUSDT", "ETH": "ETHUSDT", "BNB": "BNBUSDT",
     "SOL": "SOLUSDT", "DOGE": "DOGEUSDT", "TAO": "TAOUSDT",
     "ZEC": "ZECUSDT", "CAKE": "CAKEUSDT", "PAXG": "PAXGUSDT",
+    "HYPE": "HYPEUSDT", "TRX": "TRXUSDT", "AAVE": "AAVEUSDT",
 }
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}

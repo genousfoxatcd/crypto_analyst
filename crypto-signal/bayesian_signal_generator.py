@@ -11,7 +11,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 # 支持的交易对
-COINS = ["BTC", "ETH", "SOL", "DOGE", "BNB", "TAO", "ZEC", "CAKE", "PAXG", "HYPE"]
+COINS = ["BTC", "ETH", "SOL", "DOGE", "BNB", "TAO", "ZEC", "CAKE", "PAXG", "HYPE", "TRX", "AAVE"]
 
 # 因子名称列表
 FACTOR_NAMES = ['bb_pos', 'funding_rate', 'long_pct', 'taker_bsr', 'flow_buy', 'change_24h']
