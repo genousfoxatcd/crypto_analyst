@@ -24,14 +24,17 @@ def _agent_open_and_get(url: str, js: str = "document.body.innerText") -> str:
     """打开页面、等待加载、执行JS、返回文本（不关闭browser daemon）
     
     Note: agent-browser 使用 daemon 模式，open 命令会启动后台进程
-    因此需要用 Popen 而非 subprocess.run（后者会等待进程退出）
+    需要先滚动页面触发懒加载图表，然后等待数据加载
     """
     try:
         subprocess.Popen([AGENT_BROWSER, "open", url],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # 等待 daemon 启动 + 页面加载
         import time
-        time.sleep(8)
+        time.sleep(6)
+        # 滚动到中部触发图表懒加载
+        subprocess.run([AGENT_BROWSER, "eval", "window.scrollTo(0, 3000)"],
+                       capture_output=True, text=True, timeout=10)
+        time.sleep(4)
         subprocess.run([AGENT_BROWSER, "wait", "--load", "networkidle"],
                        capture_output=True, text=True, timeout=90)
         proc = subprocess.run([AGENT_BROWSER, "eval", js],
@@ -119,17 +122,17 @@ def _extract_net_flow(text: str) -> dict:
         result["last_3m_str"] = m.group(1).strip()
         result["last_3m"] = _parse_amount(m.group(1))
 
-    # AUM: "6.4%\n6.8%\n7.2%\n7.16%" 前面的"$100B\n$105B\n$110B\n$106B"
-    # 取最后出现的 $xxxB 值
-    aum_matches = re.findall(r'\$([\d,.]+)([BM])\b', text)
-    if aum_matches:
-        # 找 ETF 净值表后面的 AUM 值，通常是最后一个大的 B值
-        for val, unit in reversed(aum_matches):
-            v = float(val.replace(",", ""))
-            if unit == "B" and v > 1:
+    # AUM: 从 "Total AUM" 图表区域提取，格式: "Total AUM\n30d\n1y\nAll\n...\n$100B\n$105B\n$110B\n$106B"
+    # 取 Total AUM 区块中最后一组连续 $xxxB 序列的最后一个值
+    aum_section = re.search(r'Total AUM\s*30d\s*1y\s*All\s*(.{0,500}?)(\$\s*[\d,.]+[BM]\s*)+',
+                            text, re.DOTALL)
+    if aum_section:
+        all_b_vals = re.findall(r'\$\s*([\d,.]+)\s*B', aum_section.group(0))
+        if all_b_vals:
+            v = float(all_b_vals[-1].replace(",", ""))
+            if v > 1:
                 result["aum"] = v * 1e9
                 result["aum_str"] = f"${v:.1f}B"
-                break
 
     # 最强/最弱月份
     m = re.search(r'Strongest Month[^(]*\(([^)]+)\).*?\+\s*\$([\d,.]+[BM]?)', text)
