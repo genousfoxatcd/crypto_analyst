@@ -1,43 +1,42 @@
 #!/usr/bin/env python3
 """
-etf_flow_fetcher.py — BTC / ETH ETF 净流量采集模块
+etf_flow_fetcher.py — BTC / ETH ETF 净流量 + 市场概览 采集模块
 
 数据源: coinmarketcap.com/etf/bitcoin/ + /etf/ethereum/
 采集方式: agent-browser CLI (需要 JS 渲染)
-提取字段: 当日净流量 / 近一周 / 近一月 / 近三月 / AUM / 各ETF基金明细
+提取字段: 
+  - BTC/ETH ETF: 当日净流量 / 近一周/近一月/近三月 / AUM / 基金明细
+  - 市场概览: BTC主导率 / 总市值 / 总交易量 / F&G / 加密数量
 
 用法:
-  from etf_flow_fetcher import fetch_btc_etf, fetch_eth_etf
-  btc = fetch_btc_etf()
-  eth = fetch_eth_etf()
+  from etf_flow_fetcher import fetch_all
+  data = fetch_all()
+  data['btc_etf']['today_str']  # BTC ETF当日流量
+  data['market']['btc_domi']     # BTC主导率
 """
 
 import subprocess, re, json, sys
 from datetime import datetime
-from pathlib import Path
+
 
 AGENT_BROWSER = "agent-browser"
-TIMEOUT_SEC = 45
 
 
-def _agent_open_and_get(url: str, js: str = "document.body.innerText") -> str:
-    """打开页面、等待加载、执行JS、返回文本（不关闭browser daemon）
-    
-    Note: agent-browser 使用 daemon 模式，open 命令会启动后台进程
-    需要先滚动页面触发懒加载图表，然后等待数据加载
-    """
+def _get_text(url: str) -> str:
+    """用 agent-browser 打开页面，返回页面文本"""
     try:
         subprocess.Popen([AGENT_BROWSER, "open", url],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        import time
-        time.sleep(6)
-        # 滚动到中部触发图表懒加载
-        subprocess.run([AGENT_BROWSER, "eval", "window.scrollTo(0, 3000)"],
-                       capture_output=True, text=True, timeout=10)
-        time.sleep(4)
+        import time; time.sleep(4)
+        # 滚动触发图表懒加载（失败不影响后续）
+        try:
+            subprocess.run([AGENT_BROWSER, "eval", "window.scrollTo(0,3000)"],
+                           capture_output=True, timeout=8)
+        except: pass
+        time.sleep(3)
         subprocess.run([AGENT_BROWSER, "wait", "--load", "networkidle"],
-                       capture_output=True, text=True, timeout=90)
-        proc = subprocess.run([AGENT_BROWSER, "eval", js],
+                       capture_output=True, text=True, timeout=60)
+        proc = subprocess.run([AGENT_BROWSER, "eval", "document.body.innerText"],
                               capture_output=True, text=True, timeout=20)
         raw = proc.stdout.strip()
         if raw:
@@ -46,153 +45,103 @@ def _agent_open_and_get(url: str, js: str = "document.body.innerText") -> str:
             except json.JSONDecodeError:
                 return raw.strip('"')
         return ""
-    except (subprocess.TimeoutExpired, Exception) as e:
-        print(f"  [ETF fetcher] error: {e}", file=sys.stderr)
+    except Exception as e:
+        print(f"  [ETF fetcher] {e}", file=sys.stderr)
         return ""
 
 
-def _close_browser():
-    """关闭 agent-browser daemon"""
+def _close():
     try:
         subprocess.run([AGENT_BROWSER, "close"], capture_output=True, timeout=5)
     except Exception:
         pass
 
 
-def fetch_btc_etf() -> dict:
-    """获取比特币 ETF 流量数据"""
-    text = _agent_open_and_get("https://coinmarketcap.com/etf/bitcoin/")
-    if not text:
-        return {"error": "agent-browser 采集失败", "today_str": "数据不可用"}
-    data = _extract_net_flow(text)
-    data["asset"] = "BTC"
-    return data
+def _parse_amount(s: str) -> float | None:
+    try:
+        s = s.strip().replace("$","").replace(" ","").replace(",","")
+        if s.endswith("B"): return float(s[:-1]) * 1e9
+        if s.endswith("M"): return float(s[:-1]) * 1e6
+        if s.endswith("K"): return float(s[:-1]) * 1e3
+        return float(s)
+    except: return None
 
 
-def fetch_eth_etf() -> dict:
-    """获取以太坊 ETF 流量数据"""
-    text = _agent_open_and_get("https://coinmarketcap.com/etf/ethereum/")
-    if not text:
-        return {"error": "agent-browser 采集失败", "today_str": "数据不可用"}
-    data = _extract_net_flow(text)
-    data["asset"] = "ETH"
-    return data
-
-
-def _extract_net_flow(text: str) -> dict:
-    """从 CMC 页面文本提取 ETF 净流量数据"""
-    result = {
-        "today": None,   # 当日净流量(float, 单位USD)
-        "today_str": "数据不可用",
-        "last_week": None,
-        "last_week_str": "—",
-        "last_month": None,
-        "last_month_str": "—",
-        "last_3m": None,
-        "last_3m_str": "—",
-        "aum": None,
-        "aum_str": "—",
-        "strongest_month": "—",
-        "weakest_month": "—",
-        "funds": [],
+def _extract_etf(text: str) -> dict:
+    """提取 ETF 数据"""
+    r = {
+        "today": None, "today_str": "—",
+        "last_week": None, "last_week_str": "—",
+        "last_month": None, "last_month_str": "—",
+        "last_3m": None, "last_3m_str": "—",
+        "aum": None, "aum_str": "—", "funds": [],
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
-
-    # 当日净流: "Net Flow (May 28, 2026)\n- $223.30M"
     m = re.search(r'Net Flow[^(]*\(([^)]+)\)\s*\n?\s*([+-]?\s*\$\s*[\d,.]+[KMB]?)', text)
     if m:
-        result["today_str"] = f"{m.group(2).strip()}"
-        result["today"] = _parse_amount(m.group(2))
-
-    # 上周: "Last Week\n- $102.41M"
-    m = re.search(r'Last Week\s*\n?\s*([+-]?\s*\$\s*[\d,.]+[KMB]?)', text)
-    if m:
-        result["last_week_str"] = m.group(1).strip()
-        result["last_week"] = _parse_amount(m.group(1))
-
-    # 上月
-    m = re.search(r'Last Month\s*\n?\s*([+-]?\s*\$\s*[\d,.]+[KMB]?)', text)
-    if m:
-        result["last_month_str"] = m.group(1).strip()
-        result["last_month"] = _parse_amount(m.group(1))
-
-    # 近3月
-    m = re.search(r'Last 3 Months\s*\n?\s*([+-]?\s*\$\s*[\d,.]+[KMB]?)', text)
-    if m:
-        result["last_3m_str"] = m.group(1).strip()
-        result["last_3m"] = _parse_amount(m.group(1))
-
-    # AUM: 从 "Total AUM" 图表区域提取，格式: "Total AUM\n30d\n1y\nAll\n...\n$100B\n$105B\n$110B\n$106B"
-    # 取 Total AUM 区块中最后一组连续 $xxxB 序列的最后一个值
-    aum_section = re.search(r'Total AUM\s*30d\s*1y\s*All\s*(.{0,500}?)(\$\s*[\d,.]+[BM]\s*)+',
-                            text, re.DOTALL)
-    if aum_section:
-        all_b_vals = re.findall(r'\$\s*([\d,.]+)\s*B', aum_section.group(0))
-        if all_b_vals:
-            v = float(all_b_vals[-1].replace(",", ""))
+        r["today_str"] = m.group(2).strip()
+        r["today"] = _parse_amount(m.group(2))
+    for label, key in [("Last Week","last_week"),("Last Month","last_month"),("Last 3 Months","last_3m")]:
+        m = re.search(label + r'\s*\n?\s*([+-]?\s*\$\s*[\d,.]+[KMB]?)', text)
+        if m:
+            r[key+"_str"] = m.group(1).strip()
+            r[key] = _parse_amount(m.group(1))
+    # AUM from Total AUM chart
+    aum_sec = re.search(r'Total AUM\s*30d\s*1y\s*All\s*(.{0,500}?)(\$\s*[\d,.]+[BM]\s*)+', text, re.DOTALL)
+    if aum_sec:
+        vals = re.findall(r'\$\s*([\d,.]+)\s*B', aum_sec.group(0))
+        if vals:
+            v = float(vals[-1].replace(",",""))
             if v > 1:
-                result["aum"] = v * 1e9
-                result["aum_str"] = f"${v:.1f}B"
+                r["aum"] = v * 1e9; r["aum_str"] = f"${v:.1f}B"
+    # Funds list
+    funds = re.findall(r'([A-Z]{2,7})\s*\n\s*([^\n]+?)\s*\n\s*(\$[\d,.]+)\s*\n\s*(\$[\d,.]+[KMB]?)\s*\n\s*(\$[\d,.]+[KMB]?)', text)
+    for t,n,p,v,a,*_ in funds[:15]:
+        r["funds"].append({"ticker":t.strip(),"name":n.strip(),"price":p.strip(),"aum":a.strip()})
+    return r
 
-    # 最强/最弱月份
-    m = re.search(r'Strongest Month[^(]*\(([^)]+)\).*?\+\s*\$([\d,.]+[BM]?)', text)
+
+def _extract_market_overview(text: str) -> dict:
+    """从 CMC 页脚提取市场概览"""
+    r = {"btc_domi": None, "eth_domi": None, "total_mcap": None, "total_mcap_str": "—",
+         "total_vol_24h": None, "fng": None, "fng_str": "—",
+         "crypto_count": None, "exchange_count": None}
+    # "Cryptos: 51.45MExchanges: 948Market Cap: $2.47T..."
+    m = re.search(r'Cryptos:\s*([\d.]+[KM]?)', text)
+    if m: r["crypto_count"] = m.group(1)
+    m = re.search(r'Exchanges:\s*([\d,]+)', text)
+    if m: r["exchange_count"] = m.group(1)
+    m = re.search(r'Market Cap:\s*\$([\d,.]+[TBM]?)', text)
     if m:
-        result["strongest_month"] = f"{m.group(1).strip()} +${m.group(2)}"
-
-    m = re.search(r'Weakest Month[^(]*\(([^)]+)\).*?-\s*\$([\d,.]+[BM]?)', text)
+        r["total_mcap_str"] = f"${m.group(1)}"
+        r["total_mcap"] = _parse_amount(m.group(1))
+    m = re.search(r'24h Vol:\s*\$([\d,.]+[TBM]?)', text)
+    if m: r["total_vol_24h_str"] = f"${m.group(1)}"
+    m = re.search(r'Dominance:\s*BTC:\s*([\d.]+)%', text)
+    if m: r["btc_domi"] = float(m.group(1))
+    m = re.search(r'ETH:\s*([\d.]+)%', text)
+    if m: r["eth_domi"] = float(m.group(1))
+    m = re.search(r'Fear & Greed:\s*([\d]+)/100', text)
     if m:
-        result["weakest_month"] = f"{m.group(1).strip()} -${m.group(2)}"
-
-    # 提取各 ETF 基金明细 (Ticker\tFund Name\tPrice\tVolume\tAUM\t...)
-    # 格式: "IBIT\n\tiShares Bitcoin Trust\n$41.86\n$893.39M\n$66.57B\n..."
-    fund_pattern = re.findall(
-        r'([A-Z]{2,7})\s*\n\s*([^\n]+?)\s*\n\s*(\$[\d,.]+)\s*\n\s*(\$[\d,.]+[KMB]?)\s*\n\s*(\$[\d,.]+[KMB]?)\s*\n\s*(\$[\d,.]+[KMB]?)',
-        text
-    )
-    for ticker, name, price, volume, aum_, mcap in fund_pattern[:20]:
-        result["funds"].append({
-            "ticker": ticker.strip(),
-            "name": name.strip(),
-            "price": price.strip(),
-            "volume": volume.strip(),
-            "aum": aum_.strip(),
-        })
-
-    return result
-
-
-def _parse_amount(s: str) -> float:
-    """解析 $123.45M / $1.2B / $500K 为 float"""
-    s = s.strip().replace("$", "").replace(" ", "").replace(",", "")
-    try:
-        if s.endswith("B"):
-            return float(s[:-1]) * 1e9
-        elif s.endswith("M"):
-            return float(s[:-1]) * 1e6
-        elif s.endswith("K"):
-            return float(s[:-1]) * 1e3
-        else:
-            return float(s)
-    except ValueError:
-        return 0.0
+        r["fng"] = int(m.group(1))
+        v = int(m.group(1))
+        r["fng_str"] = "极度恐惧" if v <= 25 else ("恐惧" if v <= 45 else ("中性" if v <= 55 else ("贪婪" if v <= 75 else "极度贪婪")))
+    return r
 
 
 def fetch_all() -> dict:
-    """一次采集 BTC + ETH ETF 流量，结束后关闭浏览器"""
-    result = {
-        "btc_etf": fetch_btc_etf(),
-        "eth_etf": fetch_eth_etf(),
-    }
-    _close_browser()
-    return result
+    """返回 {btc_etf, eth_etf, market, generated_at}"""
+    btc_text = _get_text("https://coinmarketcap.com/etf/bitcoin/")
+    eth_text = _get_text("https://coinmarketcap.com/etf/ethereum/")
+    _close()
+    btc = _extract_etf(btc_text) if btc_text else {"error":"采集失败","today_str":"—"}
+    eth = _extract_etf(eth_text) if eth_text else {"error":"采集失败","today_str":"—"}
+    btc["asset"] = "BTC"
+    eth["asset"] = "ETH"
+    market = _extract_market_overview(btc_text or "") if btc_text else {}
+    return {"btc_etf": btc, "eth_etf": eth, "market": market,
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M")}
 
 
-# ═══════════════════════  CLI 测试 ═══════════════════════
 if __name__ == "__main__":
-    import json as _json
-    print("=== BTC ETF ===")
-    btc = fetch_btc_etf()
-    print(_json.dumps(btc, indent=2, ensure_ascii=False))
-    print("\n=== ETH ETF ===")
-    eth = fetch_eth_etf()
-    print(_json.dumps(eth, indent=2, ensure_ascii=False))
+    print(json.dumps(fetch_all(), indent=2, ensure_ascii=False))

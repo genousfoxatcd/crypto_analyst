@@ -801,8 +801,8 @@ def run(output_json: str | None = None, output_md: str | None = None) -> dict:
             coin = futs[f]
             contracts[coin] = f.result()
             d = contracts[coin]
-            fr = d.get("funding_rate", 0)
-            ls = d.get("ls_ratio_top") or d.get("ls_ratio_global")
+            fr = d.get("funding_rate", 0) or 0
+            ls = d.get("ls_ratio_top") or d.get("ls_ratio_global", 1.0) or 1.0
             oi_m = d.get("open_interest_usdt", 0) / 1e6
             p = prices.get(coin, {}).get("price", 0)
             if p:
@@ -847,30 +847,26 @@ def run(output_json: str | None = None, output_md: str | None = None) -> dict:
     else:
         print("  美元指数: 数据不可用（已跳过）")
 
-    # 恐慌贪婪指数
-    fng = _fetch_fng_simple()
-    print(f"  恐慌贪婪指数: {fng.get('now_value','?')} ({fng.get('classification','?')})  趋势:{fng.get('trend_direction','?')}")
-
-    # BTC + ETH ETF流量（CoinMarketCap 实时采集）
+    # BTC + ETH ETF流量 + 市场概览（CoinMarketCap 实时采集）
+    etf_market = {}
     etf_flow = {}
     eth_etf_flow = {}
     try:
-        from etf_flow_fetcher import fetch_btc_etf, fetch_eth_etf, _close_browser
-        etf_flow = fetch_btc_etf()
-        eth_etf_flow = fetch_eth_etf()
-        _close_browser()
+        from etf_flow_fetcher import fetch_all as fetch_etf_all
+        etf_market = fetch_etf_all()
+        etf_flow  = etf_market.get("btc_etf", {})
+        eth_etf_flow = etf_market.get("eth_etf", {})
+        market_view = etf_market.get("market", {})
+        # 提取市场概览
+        btc_domi = market_view.get("btc_domi")
+        total_mcap = market_view.get("total_mcap_str")
+        mcap_raw = market_view.get("total_mcap")
+        fng_val = market_view.get("fng")
+        if btc_domi: print(f"  BTC主导率: {btc_domi}%")
+        if total_mcap: print(f"  总市值: {total_mcap}")
+        if fng_val: print(f"  F&G: {fng_val}/100 ({market_view.get('fng_str','')})")
     except Exception as e:
-        print(f"  ETF流量采集: 跳过 ({e})")
-    
-    if etf_flow and etf_flow.get("today_str") != "数据不可用":
-        print(f"  BTC ETF: {etf_flow['today_str']} (上周{etf_flow['last_week_str']}) AUM:{etf_flow.get('aum_str','?')}")
-    else:
-        print("  BTC ETF 流量: 数据不可用")
-    
-    if eth_etf_flow and eth_etf_flow.get("today_str") != "数据不可用":
-        print(f"  ETH ETF: {eth_etf_flow['today_str']} (上周{eth_etf_flow['last_week_str']}) AUM:{eth_etf_flow.get('aum_str','?')}")
-    else:
-        print("  ETH ETF 流量: 数据不可用")
+        print(f"  ETF/市场采集: 跳过 ({e})")
 
     # ⑤ 信号生成
     print("\n[5/5] 信号生成...")
@@ -907,9 +903,10 @@ def run(output_json: str | None = None, output_md: str | None = None) -> dict:
                          for c in prices},
         "signals":      signals,
         "macro":        macro,
-        "fng":          fng,
+        "fng":          {"now_value": etf_market.get("market",{}).get("fng"), "classification": etf_market.get("market",{}).get("fng_str","")},
         "etf_flow":     etf_flow,
         "eth_etf_flow": eth_etf_flow,
+        "etf_market":   etf_market,
     }
 
     if output_json:
@@ -924,12 +921,86 @@ def run(output_json: str | None = None, output_md: str | None = None) -> dict:
 
 
 def _write_md_report(data: dict, path: str):
-    """输出 Markdown 简报"""
+    """输出 Markdown 简报 — 宏观策略摘要放首"""
     ts = data["generated_at"]
+    etf_market = data.get("etf_market", {})
+    mkt = etf_market.get("market", {})
+    btc_etf = etf_market.get("btc_etf", {})
+    eth_etf = etf_market.get("eth_etf", {})
+    macro = data.get("macro", {}) or {}
+    
+    # ── 1) 宏观策略摘要 ──────────────────────────────────────
     lines = [f"# 加密货币信号报告 | {ts}\n",
-             f"> 引擎版本 v2 | 价格源自多交易所加权\n"]
-
-    # 价格表
+             f"> 引擎版本 v2 | 多交易所加权 | CoinMarketCap 宏观\n"]
+    
+    domi = mkt.get("btc_domi")
+    mcap = mkt.get("total_mcap_str", "—")
+    fng_v = mkt.get("fng")
+    fng_s = mkt.get("fng_str", "—")
+    btc24 = btc_etf.get("today_str", "—")
+    eth24 = eth_etf.get("today_str", "—")
+    
+    # 策略评分
+    total_signals = data.get("signals", {})
+    longs = sum(1 for s in total_signals.values() if s.get("direction")=="LONG")
+    shorts = sum(1 for s in total_signals.values() if s.get("direction")=="SHORT")
+    score = longs * 25 - shorts * 15  # simplified scoring
+    strategy = "进攻型" if longs > shorts * 1.5 else ("防御型" if shorts > longs * 1.5 else "平衡型")
+    action = "积极做多" if longs > shorts * 2 else ("观望等待" if shorts > longs * 2 else "持有为主")
+    
+    lines += ["## 📊 宏观策略摘要\n",
+              "| 指标 | 数值 | 状态 |",
+              "|------|------|------|",
+              f"| 综合评分 | {score:+d} · 策略: {strategy} · {action} | —— |"]
+    if fng_v is not None:
+        fng_color = "🟢" if fng_v <= 25 else ("🟡" if fng_v <= 45 else "🟠🔴")
+        lines.append(f"| 😱 恐慌贪婪 | {fng_v} {fng_color} | {fng_s} |")
+    if domi is not None:
+        domi_status = "BTC强势" if domi > 60 else ("中性" if domi > 50 else "山寨活跃")
+        lines.append(f"| 🏛️ BTC主导率 | {domi:.1f}% | ⚖️ {domi_status} |")
+    if mcap != "—":
+        lines.append(f"| 📊 总市值 | {mcap} | 正常 |")
+    lines.append(f"| 💰 BTC ETF当日 | {btc24} | 来源: CoinMarketCap |")
+    lines.append(f"| 💰 ETH ETF当日 | {eth24} | 来源: CoinMarketCap |")
+    
+    # ETF 周/月汇总 + 近7日日估
+    import datetime as _dt
+    if btc_etf.get("today_str","—") != "—":
+        lines += ["", "### ETF 资金流向（BTC vs ETH）",
+                  "| 指标 | BTC ETF | ETH ETF |",
+                  "|------|---------|---------|",
+                  f"| 当日净流量 | {btc_etf.get('today_str','—')} | {eth_etf.get('today_str','—')} |",
+                  f"| 上周净流量 | {btc_etf.get('last_week_str','—')} | {eth_etf.get('last_week_str','—')} |",
+                  f"| 上月净流量 | {btc_etf.get('last_month_str','—')} | {eth_etf.get('last_month_str','—')} |",
+                  f"| 近3月净流量 | {btc_etf.get('last_3m_str','—')} | {eth_etf.get('last_3m_str','—')} |",
+                  f"| 总AUM | {btc_etf.get('aum_str','—')} | {eth_etf.get('aum_str','—')} |"]
+        # 近7日ETF流量估算（基于上周均值和当日值）
+        btc_wk = btc_etf.get("last_week") or 0
+        eth_wk = eth_etf.get("last_week") or 0
+        btc_today = btc_etf.get("today") or 0
+        eth_today = eth_etf.get("today") or 0
+        w = abs(btc_wk)/1e6 if abs(btc_wk) > 0 else 15
+        lines += ["",
+                  "### ETF 近7日流量估算 (单位:$M)",
+                  "| 日期 | BTC ETF | ETH ETF | 备注 |",
+                  "|------|---------|---------|------|"]
+        for i in range(6, 0, -1):
+            d = _dt.date.today() - _dt.timedelta(days=i)
+            avg_b = btc_wk/1e6/7
+            avg_e = eth_wk/1e6/7
+            lines.append(f"| {d.month}/{d.day} | ${avg_b:+.1f}M | ${avg_e:+.1f}M | 周均估算 |")
+        lines.append(f"| {_dt.date.today().month}/{_dt.date.today().day} | ${btc_today/1e6:+.1f}M | ${eth_today/1e6:+.1f}M | 当日实值 |")
+    lines.append("")
+    
+    # 纳斯达克
+    if macro.get("nasdaq",{}).get('price') is not None:
+        nd = macro["nasdaq"]
+        nd_s = f"{nd.get('change_1d_pct'):+.2f}%" if nd.get('change_1d_pct') is not None else "N/A"
+        lines += ["", "### 外部宏观", f"- **纳斯达克**: {nd['price']:,.2f}  ({nd_s})"]
+    
+    lines.append("")
+    
+    # ── 2) 实时价格 ─────────────────────────────────────────
     lines += ["## 实时价格\n",
               "| 币种 | 价格 | 24h | 24h交易量 |",
               "|------|------|-----|----------|"]
@@ -962,9 +1033,12 @@ def _write_md_report(data: dict, path: str):
     lines += ["## 合约数据\n",
               "| 币种 | 资金费率 | 多空比L/S | 多仓均价 | 空仓均价 | 买方流量 | 多头占比 |",
               "|------|---------|----------|---------|---------|---------|---------|"]
-    # 检查合约数据是否可用：看看第一个币种是否有真实的合约字段
-    first_ct = next(iter(data.get("contracts", {}).values()), {})
-    has_contract_data = first_ct.get("funding_rate") is not None
+    # 检查合约数据是否可用：看第一个有信号且资金费率非None的币种
+    has_contract_data = False
+    for s in data["signals"].values():
+        if s.get("funding_rate") is not None:
+            has_contract_data = True
+            break
     if not has_contract_data:
         lines.append("> ⚠️ 合约数据不可用：Binance Futures API 未返回数据，所有值均为默认值")
     for coin, s in data["signals"].items():
@@ -1017,69 +1091,6 @@ def _write_md_report(data: dict, path: str):
         price_str = f"${price:,.2f}" if abs(price) >= 1 else f"${price:,.4f}"
         lines.append(f"| {coin} | {price_str} | {fmt_liq(ll10)} | {fmt_liq(ll20)} | {fmt_liq(ls10)} | {fmt_liq(ls20)} | {risk_cn.get(risk, '?')} |")
     lines.append("")
-
-    # 宏观
-    macro = data.get("macro", {}) or {}
-    fng_data = data.get("fng", {}) or {}
-    etf = data.get("etf_flow", {}) or {}
-    eth_etf = data.get("eth_etf_flow", {}) or {}
-    
-    lines += ["## 宏观数据\n"]
-    
-    # ETF流量数据表（如果可用则显示）
-    has_etf = (etf.get("today_str") and etf["today_str"] != "数据不可用") or \
-              (eth_etf.get("today_str") and eth_etf["today_str"] != "数据不可用")
-    
-    if has_etf:
-        lines += ["### ETF 资金流向\n",
-                  "| 指标 | BTC ETF | ETH ETF |",
-                  "|------|---------|---------|"]
-        btc24 = etf.get("today_str", "—")
-        eth24 = eth_etf.get("today_str", "—")
-        btc_wk = etf.get("last_week_str", "—")
-        eth_wk = eth_etf.get("last_week_str", "—")
-        btc_mo = etf.get("last_month_str", "—")
-        eth_mo = eth_etf.get("last_month_str", "—")
-        btc_3m = etf.get("last_3m_str", "—")
-        eth_3m = eth_etf.get("last_3m_str", "—")
-        btc_aum = etf.get("aum_str", "—")
-        eth_aum = eth_etf.get("aum_str", "—")
-        lines.append(f"| 当日净流量 | {btc24} | {eth24} |")
-        lines.append(f"| 上周净流量 | {btc_wk} | {eth_wk} |")
-        lines.append(f"| 上月净流量 | {btc_mo} | {eth_mo} |")
-        lines.append(f"| 近3月净流量 | {btc_3m} | {eth_3m} |")
-        lines.append(f"| 总规模(AUM) | {btc_aum} | {eth_aum} |")
-        lines.append("")
-        # ETF流向趋势简述
-        btc_direction = "流出" if etf.get("today", 0) and etf["today"] < 0 else ("流入" if etf.get("today", 0) and etf["today"] > 0 else "—")
-        eth_direction = "流出" if eth_etf.get("today", 0) and eth_etf["today"] < 0 else ("流入" if eth_etf.get("today", 0) and eth_etf["today"] > 0 else "—")
-        btc_text = f"BTC ETF近期持续{btc_direction}，机构情绪偏" + ("空" if btc_direction == "流出" else "多")
-        eth_text = f"ETH ETF近期持续{eth_direction}，机构情绪偏" + ("空" if eth_direction == "流出" else "多")
-        lines.append(f"> {btc_text}；{eth_text}。数据来源: CoinMarketCap\n")
-    else:
-        lines.append("- **ETF 数据**: 暂时不可用 (需 agent-browser)\n")
-    
-    # 纳斯达克 + 恐慌贪婪
-    if macro.get("nasdaq", {}).get('price') is not None:
-        nd = macro["nasdaq"]
-        nd_s = f"{nd.get('change_1d_pct'):+.2f}%" if nd.get('change_1d_pct') is not None else "N/A"
-        lines.append(f"- **纳斯达克**: {nd['price']:,.2f}  ({nd_s})")
-    if fng_data.get("now_value") is not None:
-        lines.append(f"- **恐慌贪婪指数**: {fng_data['now_value']} ({fng_data.get('classification','')})  趋势:{fng_data.get('trend_direction','')}")
-
-    # 因子权重
-    lines.append("")
-    lines.append("### 影响因子权重")
-    lines.append("| 因子 | 权重说明 |")
-    lines.append("|------|---------|")
-    lines.append("| RSI超卖 | RSI<30超卖区域反弹(±25分) |")
-    lines.append("| 资金费率 | 杠杆多头成本(±20分) |")
-    lines.append("| 多空比 | 合约市场多空分歧度(±18分) |")
-    lines.append("| 24h资金流 | 买方成交占比(±10分) |")
-    lines.append("| 宏观联动 | 纳指/道指趋势(±12分) |")
-    lines.append("| **恐慌贪婪** | **反情绪指标，越恐慌越看多(±25分)** |")
-    lines.append("| **BTC ETF流量** | **机构资金流向，持续流入看多(±12分)** |")
-    lines.append("| **ETH ETF流量** | **机构资金流向，ETH权重为BTC的0.7倍(±7分)** |")
 
     # 插针警告
     warnings = [s.get("pin_warning") for s in data["signals"].values() if s.get("pin_warning")]
