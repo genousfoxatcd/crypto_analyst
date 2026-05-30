@@ -227,6 +227,31 @@ def generate_html(signal_file: Path, paper_file: Path, output_path: Path):
     nd_span= change_span(nd_chg)
     nd_src = nasdaq.get("source", "—")
 
+    # ETF 流量数据
+    btc_etf = data.get("etf_flow", {}) or {}
+    eth_etf = data.get("eth_etf_flow", {}) or {}
+    etf_rows = ""
+    if btc_etf.get("today_str") and btc_etf["today_str"] != "数据不可用":
+        btc24 = btc_etf.get("today_str", "—")
+        eth24 = eth_etf.get("today_str", "—")
+        btc_wk = btc_etf.get("last_week_str", "—")
+        eth_wk = eth_etf.get("last_week_str", "—")
+        btc_mo = btc_etf.get("last_month_str", "—")
+        eth_mo = eth_etf.get("last_month_str", "—")
+        btc_aum = btc_etf.get("aum_str", "—")
+        eth_aum = eth_etf.get("aum_str", "—")
+        btc_color = "#4ade80" if btc_etf.get("today", 0) and btc_etf["today"] > 0 else "#f87171"
+        eth_color = "#4ade80" if eth_etf.get("today", 0) and eth_etf["today"] > 0 else "#f87171"
+        etf_rows = f"""
+      <tr><td><b>BTC ETF 当日</b></td><td style='color:{btc_color};font-weight:600'>{btc24}</td>
+          <td>上周: {btc_wk}</td><td>上月: {btc_mo}</td><td>CoinMarketCap</td></tr>
+      <tr><td><b>ETH ETF 当日</b></td><td style='color:{eth_color};font-weight:600'>{eth24}</td>
+          <td>上周: {eth_wk}</td><td>上月: {eth_mo}</td><td>CoinMarketCap</td></tr>"""
+    else:
+        etf_rows = """
+      <tr><td><b>BTC ETF流量</b></td><td colspan="3" style="color:var(--muted)">数据不可用（需 agent-browser）</td></tr>
+      <tr><td><b>ETH ETF流量</b></td><td colspan="3" style="color:var(--muted)">数据不可用（需 agent-browser）</td></tr>"""
+
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -310,13 +335,12 @@ tr:hover td{{background:var(--card2)}}
 </section>
 
 <section id="macro">
-  <h2>🌐 宏观数据</h2>
+  <h2>🌐 宏观数据 & ETF 资金流向</h2>
   <div class="table-wrap">
   <table>
-    <thead><tr><th>指标</th><th>24h净流量</th><th>48h净流量</th><th>72h净流量</th><th>来源</th></tr></thead>
+    <thead><tr><th>指标</th><th>24h/当日</th><th>48h/上周</th><th>72h/上月</th><th>来源</th></tr></thead>
     <tbody>
-      <tr><td><b>纳斯达克</b></td><td>{nd_val}</td><td>{nd_span}</td><td>{nd_src}</td></tr>
-      <tr><td><b>美元指数 DXY</b></td><td colspan="3" style="color:var(--muted)">数据不可用</td></tr>
+      <tr><td><b>纳斯达克</b></td><td>{nd_val}</td><td>{nd_span}</td><td>{nd_src}</td></tr>{etf_rows}
     </tbody>
   </table>
   </div>
